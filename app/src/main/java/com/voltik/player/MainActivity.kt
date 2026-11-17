@@ -33,6 +33,7 @@ class MainActivity : ComponentActivity() {
     private var message by mutableStateOf<String?>(null)
     private var scanJob: Job? = null
     private var tickJob: Job? = null
+    private var periodicScanJob: Job? = null
 
     private val folderPicker = registerForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
         if (uri != null) {
@@ -100,7 +101,22 @@ class MainActivity : ComponentActivity() {
 
     override fun onResume() {
         super.onResume()
-        if (::library.isInitialized) refresh()
+        if (::library.isInitialized) {
+            refresh()
+            periodicScanJob?.cancel()
+            periodicScanJob = scope.launch {
+                while (isActive) {
+                    delay(60_000)
+                    if (!scanning && folders.isNotEmpty()) refresh()
+                }
+            }
+        }
+    }
+
+    override fun onPause() {
+        periodicScanJob?.cancel()
+        periodicScanJob = null
+        super.onPause()
     }
 
     private fun refresh() {

@@ -28,6 +28,8 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -109,7 +111,6 @@ fun VoltikApp(
                         listOf("Álbuns", "Artistas", "Coletâneas").forEachIndexed { i, label -> Tab(selected = tab == i, onClick = { tab = i }, text = { Text(label, maxLines = 1) }) }
                     }
                     if (scanning) LinearProgressIndicator(Modifier.fillMaxWidth())
-                    if (!message.isNullOrBlank()) Text(message, Modifier.padding(horizontal = 20.dp, vertical = 8.dp), color = Secondary, style = MaterialTheme.typography.bodySmall)
                     Box(Modifier.weight(1f)) {
                         if (folders.isEmpty()) {
                             Column(Modifier.fillMaxWidth().padding(24.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -126,6 +127,7 @@ fun VoltikApp(
                     }
                 }
             }
+            if (!message.isNullOrBlank()) Text(message, Modifier.fillMaxWidth().semantics { liveRegion = LiveRegionMode.Polite }.padding(horizontal = 20.dp, vertical = 8.dp), color = Color.White, style = MaterialTheme.typography.bodyMedium, maxLines = 4, overflow = TextOverflow.Ellipsis)
             if (!showPlayer && player.title.isNotBlank()) MiniPlayer(player, { showPlayer = true }, actions.togglePlay)
         }
     }
@@ -232,7 +234,6 @@ fun VoltikApp(
         }
         item { OutlinedButton(onClick = actions.addFolder) { Text("Adicionar pasta") } }
         item { OutlinedButton(onClick = actions.refresh, enabled = !scanning && folders.isNotEmpty()) { Text(if (scanning) "Atualizando…" else "Atualizar biblioteca") } }
-        if (!message.isNullOrBlank()) item { Text(message, color = Secondary, style = MaterialTheme.typography.bodySmall) }
         item { HorizontalDivider(color = Border); Spacer(Modifier.height(12.dp)) }
         item { Row(verticalAlignment = Alignment.CenterVertically) { Column(Modifier.weight(1f)) { Text("Manter tela acesa", color = Color.White); Text("Enquanto o app estiver aberto", color = Secondary, style = MaterialTheme.typography.bodySmall) }; Switch(checked = keepAwake, onCheckedChange = actions.setKeepAwake) } }
     }

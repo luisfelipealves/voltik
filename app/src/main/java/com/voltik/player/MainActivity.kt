@@ -19,6 +19,8 @@ import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import com.voltik.player.ui.*
 import kotlinx.coroutines.*
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 
 class MainActivity : ComponentActivity() {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
@@ -34,6 +36,8 @@ class MainActivity : ComponentActivity() {
     private var scanJob: Job? = null
     private var tickJob: Job? = null
     private var periodicScanJob: Job? = null
+    private val scanMutex = Mutex()
+    private var activityActive = false
 
     private val folderPicker = registerForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
         if (uri != null) {
@@ -61,12 +65,7 @@ class MainActivity : ComponentActivity() {
             mediaPlayer = player
             player.addListener(listener)
             updatePlayer()
-            tickJob = scope.launch {
-                while (isActive) {
-                    updatePlayer()
-                    delay(200)
-                }
-            }
+            startTicker()
         }, onError = {
             message = "Não foi possível iniciar o player. Feche e abra o app novamente."
         })
@@ -79,7 +78,16 @@ class MainActivity : ComponentActivity() {
                     refresh = { refresh() },
                     playSong = { album, index -> startAlbum(album, index) },
                     setCompilation = { id, value -> library.setCompilation(id, value); refresh() },
-                    togglePlay = { mediaPlayer?.let { if (it.isPlaying) it.pause() else it.play() }; updatePlayer() },
+                    togglePlay = {
+                        mediaPlayer?.let { player ->
+                            if (player.playWhenReady && player.playbackState != Player.STATE_ENDED) player.pause()
+                            else {
+                                if (player.playbackState == Player.STATE_ENDED) player.seekToDefaultPosition()
+                                player.play()
+                            }
+                        }
+                        updatePlayer()
+                    },
                     previous = { mediaPlayer?.seekToPreviousMediaItem() },
                     next = { mediaPlayer?.seekToNextMediaItem() },
                     seekTo = { position -> mediaPlayer?.seekTo(position.coerceAtLeast(0)) },
@@ -101,12 +109,14 @@ class MainActivity : ComponentActivity() {
 
     override fun onResume() {
         super.onResume()
+        activityActive = true
+        startTicker()
         if (::library.isInitialized) {
             refresh()
             periodicScanJob?.cancel()
             periodicScanJob = scope.launch {
                 while (isActive) {
-                    delay(60_000)
+                    delay(300_000)
                     if (!scanning && folders.isNotEmpty()) refresh()
                 }
             }
@@ -114,6 +124,9 @@ class MainActivity : ComponentActivity() {
     }
 
     override fun onPause() {
+        activityActive = false
+        tickJob?.cancel()
+        tickJob = null
         periodicScanJob?.cancel()
         periodicScanJob = null
         super.onPause()
@@ -132,7 +145,7 @@ class MainActivity : ComponentActivity() {
         message = null
         scanJob = scope.launch {
             try {
-                val result = withContext(Dispatchers.IO) { library.scan() }
+                val result = withContext(Dispatchers.IO) { scanMutex.withLock { library.scan() } }
                 albums = result.albums.map { album ->
                     UiAlbum(album.id, album.title, album.artist, album.songs.map { song ->
                         UiSong(song.uri.toString(), song.title, song.artist, song.durationMs)
@@ -171,10 +184,20 @@ class MainActivity : ComponentActivity() {
             title = p.mediaMetadata.title?.toString().orEmpty(),
             artist = p.mediaMetadata.artist?.toString().orEmpty(),
             durationMs = duration, positionMs = p.currentPosition.coerceAtLeast(0),
-            playing = p.isPlaying, shuffle = p.shuffleModeEnabled,
+            playing = p.playWhenReady && p.playbackState != Player.STATE_ENDED, shuffle = p.shuffleModeEnabled,
             repeatMode = p.repeatMode,
             audioLevel = if (p.isPlaying) PlaybackAudioLevel.value else 0f
         )
+    }
+
+    private fun startTicker() {
+        if (!activityActive || mediaPlayer == null || tickJob?.isActive == true) return
+        tickJob = scope.launch {
+            while (isActive) {
+                updatePlayer()
+                delay(200)
+            }
+        }
     }
 
     private fun applyKeepAwake() {

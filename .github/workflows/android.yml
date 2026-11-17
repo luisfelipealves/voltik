@@ -6,6 +6,9 @@ on:
   workflow_dispatch:
 permissions:
   contents: read
+concurrency:
+  group: voltik-${{ github.head_ref || github.ref_name }}
+  cancel-in-progress: true
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -24,6 +27,11 @@ jobs:
           packages: platform-tools
           log-accepted-android-sdk-licenses: false
       - run: sdkmanager "platforms;android-35" "build-tools;35.0.0"
+      - name: Preserve debug signing key for updates
+        uses: actions/cache@v4
+        with:
+          path: ~/.android/debug.keystore
+          key: voltik-debug-key-v1
       - run: gradle --no-daemon :app:testDebugUnitTest :app:assembleDebug
       - uses: actions/upload-artifact@v4
         if: success()

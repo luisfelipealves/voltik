@@ -1,5 +1,8 @@
 package com.voltik.player.ui
 
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
+import android.util.LruCache
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
@@ -7,6 +10,7 @@ import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -24,8 +28,11 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.liveRegion
@@ -35,6 +42,11 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlin.math.min
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withPermit
 
 data class UiSong(val uri: String, val title: String, val artist: String, val durationMs: Long = 0)
 data class UiAlbum(val id: String, val title: String, val artist: String, val songs: List<UiSong>, val isCompilation: Boolean)
@@ -56,7 +68,8 @@ data class UiActions(
     val seekTo: (Long) -> Unit,
     val toggleShuffle: () -> Unit,
     val cycleRepeat: () -> Unit,
-    val setKeepAwake: (Boolean) -> Unit
+    val setKeepAwake: (Boolean) -> Unit,
+    val loadArtwork: suspend (List<String>) -> ByteArray? = { null }
 )
 
 private val Ink = Color(0xFF101115)
@@ -64,6 +77,11 @@ private val Panel = Color(0xFF24262B)
 private val Accent = Color(0xFFC4F36A)
 private val Secondary = Color(0xFFB1B3B5)
 private val Border = Color(0xFF35373B)
+private val ArtworkCache = object : LruCache<String, Bitmap>(12 * 1024 * 1024) {
+    override fun sizeOf(key: String, value: Bitmap): Int = value.byteCount
+}
+private val NoArtworkCache = LruCache<String, Boolean>(256)
+private val ArtworkReads = Semaphore(2)
 
 @Composable
 fun VoltikApp(
@@ -89,14 +107,18 @@ fun VoltikApp(
     }
     val matches: (String) -> Boolean = { it.contains(query.trim(), ignoreCase = true) }
     val filtered = albums.filter { query.isBlank() || matches(it.title) || matches(it.artist) || it.songs.any { song -> matches(song.title) || matches(song.artist) } }
+    val playAndOpen = actions.copy(playSong = { album, index ->
+        actions.playSong(album, index)
+        showPlayer = true
+    })
 
     MaterialTheme(colorScheme = darkColorScheme(primary = Accent, background = Ink, surface = Panel, onSurface = Color.White)) {
         Column(Modifier.fillMaxSize().background(Ink).statusBarsPadding().navigationBarsPadding()) {
             when {
                 showPlayer -> PlayerScreen(player, { showPlayer = false }, actions)
                 settings -> SettingsScreen(folders, keepAwake, scanning, message, { settings = false }, actions)
-                selectedAlbum != null -> AlbumScreen(selectedAlbum, { albumId = null }, actions)
-                artist != null -> ArtistScreen(artist!!, filtered.filter { !it.isCompilation && it.artist == artist }, { artist = null }, { albumId = it })
+                selectedAlbum != null -> AlbumScreen(selectedAlbum, { albumId = null }, playAndOpen)
+                artist != null -> ArtistScreen(artist!!, filtered.filter { !it.isCompilation && it.artist == artist }, { artist = null }, { albumId = it }, actions.loadArtwork)
                 else -> {
                     Row(Modifier.fillMaxWidth().padding(start = 20.dp, end = 8.dp, top = 14.dp), verticalAlignment = Alignment.CenterVertically) {
                         Text("VOLTIK", color = Accent, letterSpacing = 2.sp, fontWeight = FontWeight.Medium, modifier = Modifier.weight(1f))
@@ -114,15 +136,15 @@ fun VoltikApp(
                     Box(Modifier.weight(1f)) {
                         if (folders.isEmpty()) {
                             Column(Modifier.fillMaxWidth().padding(24.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                                Text("Adicione suas pastas de músicas nas configurações.", color = Secondary)
-                                OutlinedButton(onClick = { settings = true }) { Text("Abrir configurações") }
+                                Text("Toque em Selecionar pasta, escolha onde estão suas músicas, toque em Usar esta pasta e permita o acesso. Você pode adicionar outras pastas depois nas configurações. O Android pode restringir a raiz do armazenamento e algumas pastas.", color = Secondary)
+                                OutlinedButton(onClick = actions.addFolder) { Text("Selecionar pasta de músicas") }
                             }
                         } else if (query.isNotBlank()) {
-                            SearchResults(filtered, query, { albumId = it }, actions)
+                            SearchResults(filtered, query, { albumId = it }, playAndOpen)
                         } else when (tab) {
-                            0 -> AlbumGrid(filtered, { albumId = it })
+                            0 -> AlbumGrid(filtered, { albumId = it }, actions.loadArtwork)
                             1 -> ArtistList(filtered.filterNot { it.isCompilation }.map { it.artist }.distinct().sortedBy { it.lowercase() }, { artist = it })
-                            else -> AlbumGrid(filtered.filter { it.isCompilation }, { albumId = it })
+                            else -> AlbumGrid(filtered.filter { it.isCompilation }, { albumId = it }, actions.loadArtwork)
                         }
                     }
                 }
@@ -133,25 +155,53 @@ fun VoltikApp(
     }
 }
 
-@Composable private fun Header(title: String, onBack: () -> Unit) {
-    Row(Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+@Composable private fun Header(title: String, onBack: () -> Unit, modifier: Modifier = Modifier) {
+    Row(modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
         TextButton(onClick = onBack) { Text("‹ Voltar") }
         Text(title, modifier = Modifier.weight(1f), color = Color.White, maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.titleMedium)
     }
 }
 
-@Composable private fun Cover(title: String, modifier: Modifier = Modifier) {
+@Composable private fun Cover(title: String, modifier: Modifier = Modifier, album: UiAlbum? = null, loadArtwork: suspend (List<String>) -> ByteArray? = { null }) {
+    val uris = remember(album) { album?.songs?.map { it.uri }.orEmpty() }
+    val key = remember(album?.id, uris) { (album?.id ?: "") + "\u0000" + uris.joinToString("\u0000") }
+    val image by androidx.compose.runtime.key(key) { produceState<Bitmap?>(initialValue = ArtworkCache.get(key), key1 = key) {
+        value = ArtworkCache.get(key)
+        if (album != null && value == null && NoArtworkCache.get(key) == null) value = withContext(Dispatchers.IO) {
+            try {
+                ArtworkReads.withPermit {
+                    val existing = ArtworkCache.get(key)
+                    if (existing != null) existing
+                    else if (NoArtworkCache.get(key) != null) null
+                    else {
+                        val bytes = loadArtwork(uris)
+                        val bitmap = if (bytes == null) null else {
+                            val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+                            BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)
+                            var sample = 1
+                            while (maxOf(bounds.outWidth, bounds.outHeight) / sample > 512) sample *= 2
+                            BitmapFactory.decodeByteArray(bytes, 0, bytes.size, BitmapFactory.Options().apply { inSampleSize = sample })
+                        }
+                        if (bitmap != null) ArtworkCache.put(key, bitmap) else NoArtworkCache.put(key, true)
+                        bitmap
+                    }
+                }
+            } catch (cancelled: CancellationException) { throw cancelled }
+              catch (_: Exception) { null }
+        }
+    } }
     Box(modifier.clip(RoundedCornerShape(5.dp)).background(Panel), contentAlignment = Alignment.Center) {
-        Text(title.take(1).uppercase().ifBlank { "♫" }, fontSize = 38.sp, color = Accent)
+        if (image == null) Text(title.take(1).uppercase().ifBlank { "♫" }, fontSize = 38.sp, color = Accent)
+        else Image(bitmap = image!!.asImageBitmap(), contentDescription = "Capa do álbum $title", contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
     }
 }
 
-@Composable private fun AlbumGrid(albums: List<UiAlbum>, onOpen: (String) -> Unit) {
+@Composable private fun AlbumGrid(albums: List<UiAlbum>, onOpen: (String) -> Unit, loadArtwork: suspend (List<String>) -> ByteArray?) {
     if (albums.isEmpty()) { Text("Nenhum álbum encontrado.", Modifier.padding(24.dp), color = Secondary); return }
     LazyVerticalGrid(columns = GridCells.Adaptive(145.dp), contentPadding = PaddingValues(20.dp), horizontalArrangement = Arrangement.spacedBy(14.dp), verticalArrangement = Arrangement.spacedBy(18.dp)) {
         items(albums, key = { it.id }) { album ->
-            Column(Modifier.clickable { onOpen(album.id) }) {
-                Cover(album.title, Modifier.fillMaxWidth().aspectRatio(1f))
+            Column(Modifier.testTag("album-${album.id}").clickable { onOpen(album.id) }) {
+                Cover(album.title, Modifier.fillMaxWidth().aspectRatio(1f), album, loadArtwork)
                 Spacer(Modifier.height(7.dp))
                 Text(album.title, color = Color.White, maxLines = 1, overflow = TextOverflow.Ellipsis, fontWeight = FontWeight.Medium)
                 Text(album.artist, color = Secondary, maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodySmall)
@@ -167,18 +217,18 @@ fun VoltikApp(
     }
 }
 
-@Composable private fun ColumnScope.ArtistScreen(artist: String, albums: List<UiAlbum>, back: () -> Unit, onOpen: (String) -> Unit) {
+@Composable private fun ColumnScope.ArtistScreen(artist: String, albums: List<UiAlbum>, back: () -> Unit, onOpen: (String) -> Unit, loadArtwork: suspend (List<String>) -> ByteArray?) {
     Header("Artista", back)
     Text(artist, Modifier.padding(horizontal = 20.dp, vertical = 16.dp), color = Color.White, style = MaterialTheme.typography.headlineMedium)
     Text("Álbuns", Modifier.padding(horizontal = 20.dp), color = Secondary)
-    Box(Modifier.weight(1f)) { AlbumGrid(albums, onOpen) }
+    Box(Modifier.weight(1f)) { AlbumGrid(albums, onOpen, loadArtwork) }
 }
 
 @Composable private fun ColumnScope.AlbumScreen(album: UiAlbum, back: () -> Unit, actions: UiActions) {
     var menu by remember { mutableStateOf(false) }
     Header("Álbum", back)
     Row(Modifier.fillMaxWidth().padding(20.dp), verticalAlignment = Alignment.CenterVertically) {
-        Cover(album.title, Modifier.size(112.dp))
+        Cover(album.title, Modifier.size(112.dp), album, actions.loadArtwork)
         Column(Modifier.weight(1f).padding(start = 16.dp)) {
             Text(album.title, color = Color.White, style = MaterialTheme.typography.titleLarge)
             Text(album.artist, color = Secondary, style = MaterialTheme.typography.bodyMedium)
@@ -192,11 +242,12 @@ fun VoltikApp(
             }
         }
     }
+    Button(onClick = { actions.playSong(album, 0) }, enabled = album.songs.isNotEmpty(), modifier = Modifier.testTag("album-play").padding(horizontal = 20.dp)) { Text("▶  Reproduzir álbum") }
     Text("Músicas", Modifier.padding(horizontal = 20.dp, vertical = 8.dp), color = Color.White, style = MaterialTheme.typography.titleMedium)
     LazyColumn(Modifier.weight(1f), contentPadding = PaddingValues(horizontal = 20.dp)) {
         items(album.songs.size) { index ->
             val song = album.songs[index]
-            Row(Modifier.fillMaxWidth().clickable { actions.playSong(album, index) }.padding(vertical = 15.dp), verticalAlignment = Alignment.CenterVertically) {
+            Row(Modifier.fillMaxWidth().testTag("track-$index").clickable { actions.playSong(album, index) }.padding(vertical = 15.dp), verticalAlignment = Alignment.CenterVertically) {
                 Text("${index + 1}".padStart(2, '0'), Modifier.width(36.dp), color = Secondary, style = MaterialTheme.typography.bodySmall)
                 Column(Modifier.weight(1f)) { Text(song.title, color = Color.White, maxLines = 1, overflow = TextOverflow.Ellipsis); Text(song.artist, color = Secondary, style = MaterialTheme.typography.bodySmall) }
                 if (song.durationMs > 0) Text(formatTime(song.durationMs), color = Secondary, style = MaterialTheme.typography.bodySmall)
@@ -247,7 +298,7 @@ fun VoltikApp(
 }
 
 @Composable private fun ColumnScope.PlayerScreen(player: UiPlayer, back: () -> Unit, actions: UiActions) {
-    Header("Tocando agora", back)
+    Header("Tocando agora", back, Modifier.testTag("player-screen"))
     Box(Modifier.weight(1f).fillMaxWidth().padding(24.dp), contentAlignment = Alignment.Center) { Orbit(player.audioLevel, player.playing) }
     Column(Modifier.fillMaxWidth().padding(horizontal = 24.dp)) {
         Text(player.title.ifBlank { "Nenhuma música" }, color = Color.White, style = MaterialTheme.typography.headlineSmall, maxLines = 2, overflow = TextOverflow.Ellipsis)

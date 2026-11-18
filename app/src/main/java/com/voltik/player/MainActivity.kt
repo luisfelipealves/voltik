@@ -2,6 +2,7 @@ package com.voltik.player
 
 import android.Manifest
 import android.content.Intent
+import android.content.ActivityNotFoundException
 import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
@@ -38,8 +39,12 @@ class MainActivity : ComponentActivity() {
     private var periodicScanJob: Job? = null
     private val scanMutex = Mutex()
     private var activityActive = false
+    // Picker results are delivered before onResume. The result already initiates
+    // a scan, or sets an actionable error; do not immediately overwrite either.
+    private var pickerResultHandled = false
 
     private val folderPicker = registerForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
+        pickerResultHandled = true
         if (uri != null) {
             if (library.addFolder(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)) refresh()
             else message = "Não foi possível manter o acesso à pasta. Tente selecioná-la novamente."
@@ -73,7 +78,12 @@ class MainActivity : ComponentActivity() {
         setContent {
             VoltikApp(albums, folders, playerState, keepAwake, scanning, message,
                 UiActions(
-                    addFolder = { folderPicker.launch(null) },
+                    addFolder = {
+                        try { folderPicker.launch(null) }
+                        catch (_: ActivityNotFoundException) {
+                            message = "O seletor de pastas do Android não está disponível neste aparelho."
+                        }
+                    },
                     removeFolder = { uri -> library.removeFolder(Uri.parse(uri)); refresh() },
                     refresh = { refresh() },
                     playSong = { album, index -> startAlbum(album, index) },
@@ -101,6 +111,9 @@ class MainActivity : ComponentActivity() {
                         keepAwake = enabled
                         getSharedPreferences("voltik_settings", MODE_PRIVATE).edit().putBoolean("keep_awake", enabled).apply()
                         applyKeepAwake()
+                    },
+                    loadArtwork = { uris ->
+                        withContext(Dispatchers.IO) { library.readEmbeddedArtwork(uris.map(Uri::parse)) }
                     }
                 )
             )
@@ -112,7 +125,7 @@ class MainActivity : ComponentActivity() {
         activityActive = true
         startTicker()
         if (::library.isInitialized) {
-            refresh()
+            if (pickerResultHandled) pickerResultHandled = false else refresh()
             periodicScanJob?.cancel()
             periodicScanJob = scope.launch {
                 while (isActive) {

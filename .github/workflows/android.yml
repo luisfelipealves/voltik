@@ -30,9 +30,15 @@ jobs:
       - name: Preserve debug signing key for updates
         uses: actions/cache@v4
         with:
-          path: ~/.android/debug.keystore
-          key: voltik-debug-key-v1
-      - run: gradle --no-daemon :app:testDebugUnitTest :app:assembleDebug
+          path: .debug-signing/debug.keystore
+          key: voltik-debug-key-v2
+      - name: Create debug key if no cached key exists
+        run: |
+          mkdir -p .debug-signing
+          if [ ! -f .debug-signing/debug.keystore ]; then
+            keytool -genkeypair -keystore .debug-signing/debug.keystore -storetype JKS -alias androiddebugkey -storepass android -keypass android -dname "CN=Android Debug,O=Android,C=US" -keyalg RSA -keysize 2048 -validity 10000 -noprompt
+          fi
+      - run: gradle --no-daemon :app:testDebugUnitTest :app:assembleDebug :app:assembleDebugAndroidTest
       - uses: actions/upload-artifact@v4
         if: success()
         with:

@@ -2,6 +2,7 @@ package com.voltik.player
 
 import android.content.Context
 import android.content.Intent
+import android.graphics.BitmapFactory
 import android.media.MediaMetadataRetriever
 import android.net.Uri
 import android.provider.DocumentsContract
@@ -60,6 +61,31 @@ class MusicLibrary(context: Context) {
         prefs.edit().putStringSet("folders", folders().map { it.toString() }.toSet() - uri.toString()).apply()
         try { resolver.releasePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION) }
         catch (_: SecurityException) { }
+    }
+
+    /** Read the first embedded image in an album; run on Dispatchers.IO.
+     * Callers should cache decoded, downsampled thumbnails by album ID.
+     * A missing/broken image on one track must not hide images on later tracks. */
+    fun readEmbeddedArtwork(uris: List<Uri>): ByteArray? {
+        return firstValidArtwork(uris, 8 * 1024 * 1024) { uri ->
+            val retriever = MediaMetadataRetriever()
+            try {
+                retriever.setDataSource(app, uri)
+                val data = retriever.embeddedPicture
+                if (data == null || data.isEmpty() || data.size > 8 * 1024 * 1024) null
+                else {
+                    // Validate headers without allocating the decoded bitmap, so
+                    // a corrupt first cover does not hide a valid later cover.
+                    val options = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+                    BitmapFactory.decodeByteArray(data, 0, data.size, options)
+                    if (options.outWidth > 0 && options.outHeight > 0) data else null
+                }
+            } catch (_: Exception) {
+                null
+            } finally {
+                try { retriever.release() } catch (_: Exception) { }
+            }
+        }
     }
 
     /** null discards the user override and returns to metadata-based detection. */
@@ -159,9 +185,14 @@ class MusicLibrary(context: Context) {
                 meta(MediaMetadataRetriever.METADATA_KEY_ALBUM).ifBlank { UNKNOWN_ALBUM },
                 meta(MediaMetadataRetriever.METADATA_KEY_ALBUMARTIST), track,
                 meta(MediaMetadataRetriever.METADATA_KEY_DURATION).toLongOrNull() ?: 0L, folderId, compilation)
+        } catch (e: SecurityException) {
+            // Do not silently report an empty library if the SAF grant is gone.
+            throw e
         } catch (_: Exception) {
-            // A corrupt file must not make the whole collection inaccessible.
-            return null
+            // Tag extraction can fail for a file the player can nevertheless
+            // read. Keep the track so a metadata problem does not hide music.
+            val title = filename.substringBeforeLast('.', filename).ifBlank { "Faixa sem título" }
+            return Song(uri, title, UNKNOWN_ARTIST, UNKNOWN_ALBUM, "", 0, 0L, folderId, false)
         } finally { try { retriever.release() } catch (_: Exception) {} }
     }
 

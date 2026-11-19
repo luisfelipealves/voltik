@@ -40,7 +40,7 @@ jobs:
           disable-animations: true
           emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim
           script: |
-            ffmpeg -hide_banner -loglevel error -f lavfi -i 'sine=frequency=440:duration=30' -ac 1 -ar 22050 -b:a 32k -metadata title='Voltik SAF song' -metadata artist='Voltik Test' -metadata album='SAF Album' -y /tmp/voltik-fixture.mp3
+            base64 --decode .github/testdata/voltik-saf.mp3.b64 > /tmp/voltik-fixture.mp3
             adb shell mkdir -p /sdcard/Music/VoltikSafFixture
             adb push /tmp/voltik-fixture.mp3 /sdcard/Music/VoltikSafFixture/fixture.mp3
             gradle --no-daemon :app:assembleDebug :app:assembleDebugAndroidTest

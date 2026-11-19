@@ -12,6 +12,7 @@ import android.os.SystemClock
 import android.util.Log
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
+import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.media3.common.MediaItem
@@ -84,7 +85,7 @@ class SafPlaybackFocusInstrumentedTest {
         compose.waitUntil(30_000) { compose.onAllNodesWithText("SAF Album").fetchSemanticsNodes().isNotEmpty() }
         compose.onNodeWithText("SAF Album").performClick()
         compose.onNodeWithText("Voltik SAF song").performClick()
-        compose.onNodeWithText("Tocando agora").assertExists()
+        compose.onNodeWithTag("visual-surface").assertExists()
 
         val serviceError = AtomicReference<String?>(null)
         val connected = CountDownLatch(1)

@@ -86,7 +86,10 @@ private val ArtworkReads = Semaphore(2)
 @Composable
 fun VoltikApp(
     albums: List<UiAlbum>, folders: List<UiFolder>, player: UiPlayer,
-    keepAwake: Boolean, scanning: Boolean, message: String?, actions: UiActions
+    keepAwake: Boolean, scanning: Boolean, message: String?, actions: UiActions,
+    visualState: VisualUiState? = null,
+    visualActions: VisualUiActions? = null,
+    projectMContent: (@Composable () -> Unit)? = null
 ) {
     var tab by rememberSaveable { mutableStateOf(0) }
     var albumId by rememberSaveable { mutableStateOf<String?>(null) }
@@ -115,7 +118,7 @@ fun VoltikApp(
     MaterialTheme(colorScheme = darkColorScheme(primary = Accent, background = Ink, surface = Panel, onSurface = Color.White)) {
         Column(Modifier.fillMaxSize().background(Ink).statusBarsPadding().navigationBarsPadding()) {
             when {
-                showPlayer -> PlayerScreen(player, { showPlayer = false }, actions)
+                showPlayer -> PlayerScreen(player, { showPlayer = false }, actions, visualState, visualActions, projectMContent)
                 settings -> SettingsScreen(folders, keepAwake, scanning, message, { settings = false }, actions)
                 selectedAlbum != null -> AlbumScreen(selectedAlbum, { albumId = null }, playAndOpen)
                 artist != null -> ArtistScreen(artist!!, filtered.filter { !it.isCompilation && it.artist == artist }, { artist = null }, { albumId = it }, actions.loadArtwork)
@@ -297,9 +300,15 @@ fun VoltikApp(
     }
 }
 
-@Composable private fun ColumnScope.PlayerScreen(player: UiPlayer, back: () -> Unit, actions: UiActions) {
+@Composable private fun ColumnScope.PlayerScreen(player: UiPlayer, back: () -> Unit, actions: UiActions, visualState: VisualUiState?, visualActions: VisualUiActions?, projectMContent: (@Composable () -> Unit)?) {
     Header("Tocando agora", back, Modifier.testTag("player-screen"))
-    Box(Modifier.weight(1f).fillMaxWidth().padding(24.dp), contentAlignment = Alignment.Center) { Orbit(player.audioLevel, player.playing) }
+    if (visualState != null && visualActions != null) VisualPicker(visualState, visualActions)
+    if (!visualState?.message.isNullOrBlank()) Text(visualState!!.message!!, Modifier.fillMaxWidth().semantics { liveRegion = LiveRegionMode.Polite }.padding(horizontal = 20.dp), color = Color.White, style = MaterialTheme.typography.bodyMedium)
+    if (visualState?.activePresetId != null && projectMContent == null) Text("Visual importado indisponível; exibindo Órbita Voltik.", Modifier.fillMaxWidth().semantics { liveRegion = LiveRegionMode.Polite }.padding(horizontal = 20.dp), color = Color.White, style = MaterialTheme.typography.bodyMedium)
+    Box(Modifier.weight(1f).fillMaxWidth().padding(24.dp), contentAlignment = Alignment.Center) {
+        if (visualState?.activePresetId != null && projectMContent != null) projectMContent()
+        else VoltikVisualizer(player.audioLevel, player.playing)
+    }
     Column(Modifier.fillMaxWidth().padding(horizontal = 24.dp)) {
         Text(player.title.ifBlank { "Nenhuma música" }, color = Color.White, style = MaterialTheme.typography.headlineSmall, maxLines = 2, overflow = TextOverflow.Ellipsis)
         Text(player.artist, color = Secondary)

@@ -27,6 +27,12 @@ jobs:
           packages: platform-tools
           log-accepted-android-sdk-licenses: false
       - run: sdkmanager "platforms;android-35" "build-tools;35.0.0"
+      - name: Download and prepare projectM
+        run: |
+          mkdir -p app/libs
+          curl --fail --location --retry 3 -o app/libs/projectM-TV-core-2.3.57.aar https://github.com/johnneerdael/ProjectM-Android/releases/download/v2.3.57/projectM-TV-core-2.3.57.aar
+          echo "b18f9d0bc4b108d424d05cb8d7923c3ca4134faad86faf64da5d5ed95ed4c337  app/libs/projectM-TV-core-2.3.57.aar" | sha256sum -c -
+          python3 scripts/prepare_projectm.py app/libs/projectM-TV-core-2.3.57.aar
       - name: Preserve debug signing key for updates
         uses: actions/cache@v4
         with:

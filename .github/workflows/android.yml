@@ -27,20 +27,18 @@ jobs:
           packages: platform-tools
           log-accepted-android-sdk-licenses: false
       - run: sdkmanager "platforms;android-35" "build-tools;35.0.0"
-      - name: Preserve debug signing key for updates
-        uses: actions/cache@v4
-        with:
-          path: .debug-signing/debug.keystore
-          key: voltik-debug-key-v2
-      - name: Verify existing debug signing identity
-        shell: bash
+      - name: Download and verify projectM
         run: |
-          test -s .debug-signing/debug.keystore || { echo "::error::A chave de teste não está disponível; não gerar uma nova automaticamente."; exit 1; }
-          actual=$(keytool -exportcert -keystore .debug-signing/debug.keystore -storepass android -alias androiddebugkey | sha256sum | cut -d' ' -f1)
-          test "$actual" = "b4a28aa309faf6fa2a3a96d3d038961b3688fdcbc37c2f43df28a400f226de30" || { echo "::error::Assinatura diferente da versão 0.1.2."; exit 1; }
+          mkdir -p app/libs
+          curl --fail --location --retry 3 -o app/libs/projectM-TV-core-2.3.57.aar https://github.com/johnneerdael/ProjectM-Android/releases/download/v2.3.57/projectM-TV-core-2.3.57.aar
+          echo "b18f9d0bc4b108d424d05cb8d7923c3ca4134faad86faf64da5d5ed95ed4c337  app/libs/projectM-TV-core-2.3.57.aar" | sha256sum -c -
+      - name: Prepare disposable testing key
+        run: |
+          mkdir -p .debug-signing
+          keytool -genkeypair -keystore .debug-signing/debug.keystore -storetype JKS -alias androiddebugkey -storepass android -keypass android -dname "CN=Android Debug,O=Android,C=US" -keyalg RSA -keysize 2048 -validity 10000 -noprompt
       - run: gradle --no-daemon :app:testDebugUnitTest :app:assembleDebug :app:assembleDebugAndroidTest
       - uses: actions/upload-artifact@v4
         if: success()
         with:
-          name: voltik-debug
+          name: experimental-do-not-install
           path: app/build/outputs/apk/debug/app-debug.apk

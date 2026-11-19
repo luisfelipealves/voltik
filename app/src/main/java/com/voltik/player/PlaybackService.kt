@@ -28,6 +28,11 @@ object PlaybackAudioLevel {
     internal fun update(newValue: Float) { value = newValue.coerceIn(0f, 1f) }
 }
 
+/** PCM tap: off unless a visible visualizer opts in; no Activity retained. */
+object PlaybackPcmCapture {
+    @JvmField val tap = PcmCapture()
+}
+
 @OptIn(UnstableApi::class)
 internal class LevelAudioProcessor : BaseAudioProcessor() {
     override fun onConfigure(inputAudioFormat: AudioProcessor.AudioFormat): AudioProcessor.AudioFormat =
@@ -38,6 +43,12 @@ internal class LevelAudioProcessor : BaseAudioProcessor() {
         // data has been processed, replaceOutputBuffer(0) returns the same
         // shared EMPTY_BUFFER and put(inputBuffer) would copy a buffer to itself.
         if (!inputBuffer.hasRemaining()) return
+        // This is an observational tap. A visualization bug must not stop audio.
+        try {
+            PlaybackPcmCapture.tap.accept(inputBuffer, inputAudioFormat.channelCount)
+        } catch (_: RuntimeException) {
+            PlaybackPcmCapture.tap.setEnabled(false)
+        }
         val sampleBuffer = inputBuffer.duplicate().order(ByteOrder.LITTLE_ENDIAN)
         var sum = 0.0
         var count = 0
@@ -52,8 +63,16 @@ internal class LevelAudioProcessor : BaseAudioProcessor() {
         output.flip()
     }
 
-    override fun onFlush() { PlaybackAudioLevel.update(0f) }
-    override fun onReset() { PlaybackAudioLevel.update(0f) }
+    override fun onFlush() {
+        PlaybackAudioLevel.update(0f)
+        PlaybackPcmCapture.tap.clear()
+        PlaybackPcmCapture.tap.setSampleRateHz(inputAudioFormat.sampleRate)
+    }
+    override fun onReset() {
+        PlaybackAudioLevel.update(0f)
+        PlaybackPcmCapture.tap.clear()
+        PlaybackPcmCapture.tap.setSampleRateHz(0)
+    }
 }
 
 /** Owns the player and media session so playback continues when the UI closes. */
@@ -97,6 +116,8 @@ class PlaybackService : MediaSessionService() {
         session?.run { player.release(); release() }
         session = null
         PlaybackAudioLevel.update(0f)
+        PlaybackPcmCapture.tap.setEnabled(false)
+        PlaybackPcmCapture.tap.clear()
         super.onDestroy()
     }
 }

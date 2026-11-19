@@ -12,6 +12,16 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.remember
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.media3.common.C
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
@@ -19,15 +29,18 @@ import com.voltik.player.ui.*
 import kotlinx.coroutines.*
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import java.util.UUID
 
 class MainActivity : ComponentActivity() {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private lateinit var library: MusicLibrary
     private lateinit var playback: PlaybackController
+    private lateinit var milkdrop: MilkdropCoordinator
     private var mediaPlayer: Player? = null
     private var albums by mutableStateOf<List<UiAlbum>>(emptyList())
     private var folders by mutableStateOf<List<UiFolder>>(emptyList())
     private var playerState by mutableStateOf(UiPlayer())
+    private var actuallyPlaying by mutableStateOf(false)
     private var keepAwake by mutableStateOf(false)
     private var scanning by mutableStateOf(false)
     private var message by mutableStateOf<String?>(null)
@@ -48,6 +61,9 @@ class MainActivity : ComponentActivity() {
             else message = "Não foi possível manter o acesso à pasta. Tente selecioná-la novamente."
         }
     }
+    private val presetPicker = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) milkdrop.importPreset(uri)
+    }
     private val listener = object : Player.Listener {
         override fun onEvents(player: Player, events: Player.Events) { updatePlayer() }
         override fun onIsPlayingChanged(isPlaying: Boolean) {
@@ -67,6 +83,8 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         library = MusicLibrary(applicationContext)
         playback = PlaybackController(applicationContext)
+        milkdrop = MilkdropCoordinator(applicationContext, scope)
+        milkdrop.restore()
         keepAwake = getSharedPreferences("voltik_settings", MODE_PRIVATE).getBoolean("keep_awake", false)
         applyKeepAwake()
         playback.connect(onConnected = { player ->
@@ -79,6 +97,31 @@ class MainActivity : ComponentActivity() {
         })
 
         setContent {
+            val visual = milkdrop.state
+            val visualId = visual.activePresetId
+            val projectMContent: (@Composable () -> Unit)? = if (visualId == null) null else {
+                {
+                    val token = remember { UUID.randomUUID().toString() }
+                    DisposableEffect(token) {
+                        milkdrop.panelAttached(token)
+                        onDispose { milkdrop.panelDisposed(token) }
+                    }
+                    Box(Modifier.fillMaxSize()) {
+                        ProjectMPanel(
+                            lifecycle = lifecycle,
+                            isPlaying = actuallyPlaying,
+                            pcmSnapshot = { PlaybackPcmCapture.tap.snapshot(1536) },
+                            enablePcmCapture = { enabled -> PlaybackPcmCapture.tap.setEnabled(enabled) },
+                            onError = { detail -> scope.launch { milkdrop.panelError(visualId, token, detail) } },
+                            onGlReady = { scope.launch { milkdrop.glReady(token) } },
+                            expectedPreset = milkdrop.expectedPreset,
+                            activationBaseline = milkdrop.activationBaseline,
+                            onPresetRendered = { id -> scope.launch { milkdrop.presetRendered(id, token) } }
+                        )
+                        if (visual.busy) Box(Modifier.fillMaxSize().background(Color(0xFF101115)), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
+                    }
+                }
+            }
             VoltikApp(albums, folders, playerState, keepAwake, scanning,
                 listOfNotNull(playbackMessage, message).takeIf { it.isNotEmpty() }?.joinToString("\n"),
                 UiActions(
@@ -123,7 +166,14 @@ class MainActivity : ComponentActivity() {
                     loadArtwork = { uris ->
                         withContext(Dispatchers.IO) { library.readEmbeddedArtwork(uris.map(Uri::parse)) }
                     }
-                )
+                ),
+                visualState = visual,
+                visualActions = VisualUiActions(
+                    importPreset = { try { presetPicker.launch(arrayOf("*/*")) } catch (_: ActivityNotFoundException) { milkdrop.importUnavailable() } },
+                    chooseVoltik = milkdrop::chooseVoltik,
+                    choosePreset = milkdrop::choosePreset
+                ),
+                projectMContent = projectMContent
             )
         }
     }
@@ -205,6 +255,7 @@ class MainActivity : ComponentActivity() {
 
     private fun updatePlayer() {
         val p = mediaPlayer ?: return
+        actuallyPlaying = p.isPlaying
         val duration = p.duration.takeIf { it != C.TIME_UNSET && it > 0 } ?: 0L
         playerState = UiPlayer(
             title = p.mediaMetadata.title?.toString().orEmpty(),

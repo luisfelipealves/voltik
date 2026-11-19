@@ -2,7 +2,7 @@ plugins { id("com.android.application"); id("org.jetbrains.kotlin.android"); id(
 android {
  namespace = "com.voltik.player"
  compileSdk = 35
- defaultConfig { applicationId = "com.voltik.player"; minSdk = 26; targetSdk = 35; versionCode = 5; versionName = "0.1.4"; testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner" }
+ defaultConfig { applicationId = "com.voltik.player"; minSdk = 26; targetSdk = 35; versionCode = 6; versionName = "0.1.5-experimental"; testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner" }
  if (System.getenv("CI") == "true") {
   signingConfigs {
    getByName("debug") {
@@ -13,11 +13,13 @@ android {
    }
   }
  }
+ packaging { jniLibs.useLegacyPackaging = true }
  buildFeatures { compose = true }
  compileOptions { sourceCompatibility = JavaVersion.VERSION_17; targetCompatibility = JavaVersion.VERSION_17 }
  kotlinOptions { jvmTarget = "17" }
 }
 dependencies {
+ implementation(files("libs/projectM-TV-core-2.3.57.aar"))
  implementation(platform("androidx.compose:compose-bom:2025.02.00"))
  implementation("androidx.activity:activity-compose:1.10.0")
  implementation("androidx.compose.material3:material3")

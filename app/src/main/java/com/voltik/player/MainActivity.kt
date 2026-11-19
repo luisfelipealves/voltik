@@ -7,6 +7,7 @@ import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.util.Log
 import android.view.WindowManager
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -34,6 +35,7 @@ class MainActivity : ComponentActivity() {
     private var keepAwake by mutableStateOf(false)
     private var scanning by mutableStateOf(false)
     private var message by mutableStateOf<String?>(null)
+    private var playbackMessage by mutableStateOf<String?>(null)
     private var scanJob: Job? = null
     private var tickJob: Job? = null
     private var periodicScanJob: Job? = null
@@ -54,8 +56,15 @@ class MainActivity : ComponentActivity() {
 
     private val listener = object : Player.Listener {
         override fun onEvents(player: Player, events: Player.Events) { updatePlayer() }
+        override fun onIsPlayingChanged(isPlaying: Boolean) {
+            if (isPlaying) playbackMessage = null
+        }
         override fun onPlayerError(error: PlaybackException) {
-            message = "Não foi possível reproduzir esta música. Verifique o arquivo e o acesso à pasta."
+            val causeName = errorCauseName(error)
+            val code = error.errorCodeName
+            // Do not log exception messages, track titles or SAF URIs.
+            Log.e("VoltikPlayback", "Playback error: code=$code, cause=${causeName ?: "none"}")
+            playbackMessage = playbackErrorMessage(code, causeName)
             updatePlayer()
         }
     }
@@ -72,11 +81,12 @@ class MainActivity : ComponentActivity() {
             updatePlayer()
             startTicker()
         }, onError = {
-            message = "Não foi possível iniciar o player. Feche e abra o app novamente."
+            playbackMessage = "Não foi possível iniciar o player. Feche e abra o app novamente."
         })
 
         setContent {
-            VoltikApp(albums, folders, playerState, keepAwake, scanning, message,
+            VoltikApp(albums, folders, playerState, keepAwake, scanning,
+                listOfNotNull(playbackMessage, message).takeIf { it.isNotEmpty() }?.joinToString("\n"),
                 UiActions(
                     addFolder = {
                         try { folderPicker.launch(null) }
@@ -90,7 +100,11 @@ class MainActivity : ComponentActivity() {
                     setCompilation = { id, value -> library.setCompilation(id, value); refresh() },
                     togglePlay = {
                         mediaPlayer?.let { player ->
-                            if (player.playWhenReady && player.playbackState != Player.STATE_ENDED) player.pause()
+                            if (player.playerError != null) {
+                                playbackMessage = null
+                                player.prepare()
+                                player.play()
+                            } else if (player.playWhenReady && player.playbackState != Player.STATE_ENDED) player.pause()
                             else {
                                 if (player.playbackState == Player.STATE_ENDED) player.seekToDefaultPosition()
                                 player.play()
@@ -178,16 +192,24 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun startAlbum(album: UiAlbum, index: Int) {
-        if (mediaPlayer == null) { message = "O player ainda está iniciando. Tente novamente."; return }
+        if (mediaPlayer == null) { playbackMessage = "O player ainda está iniciando. Tente novamente."; return }
         if (Build.VERSION.SDK_INT >= 33 && ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
             notificationPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
         }
         try {
+            playbackMessage = null
             playback.playAlbum(album.songs.map { PlaybackTrack(it.uri, it.title, it.artist, album.title) }, index)
             updatePlayer()
         } catch (e: Exception) {
-            message = "Não foi possível iniciar a reprodução."
+            val causeName = e.javaClass.simpleName
+            Log.e("VoltikPlayback", "Playback setup error: cause=$causeName")
+            playbackMessage = playbackErrorMessage("ERRO_AO_INICIAR", causeName)
         }
+    }
+
+    private fun errorCauseName(error: Throwable): String? {
+        val causes = generateSequence(error.cause) { it.cause }.take(12).toList()
+        return (causes.firstOrNull { it is SecurityException } ?: causes.lastOrNull())?.javaClass?.simpleName
     }
 
     private fun updatePlayer() {
@@ -197,7 +219,7 @@ class MainActivity : ComponentActivity() {
             title = p.mediaMetadata.title?.toString().orEmpty(),
             artist = p.mediaMetadata.artist?.toString().orEmpty(),
             durationMs = duration, positionMs = p.currentPosition.coerceAtLeast(0),
-            playing = p.playWhenReady && p.playbackState != Player.STATE_ENDED, shuffle = p.shuffleModeEnabled,
+            playing = p.playerError == null && p.playWhenReady && p.playbackState != Player.STATE_ENDED, shuffle = p.shuffleModeEnabled,
             repeatMode = p.repeatMode,
             audioLevel = if (p.isPlaying) PlaybackAudioLevel.value else 0f
         )

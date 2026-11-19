@@ -1,6 +1,10 @@
 package com.voltik.player
 
 import android.content.Context
+import android.media.AudioAttributes as AndroidAudioAttributes
+import android.media.AudioFocusRequest
+import android.media.AudioManager
+import android.net.Uri
 import android.os.Build
 import android.os.SystemClock
 import android.util.Log
@@ -18,6 +22,7 @@ import androidx.test.uiautomator.By
 import androidx.test.uiautomator.UiDevice
 import androidx.test.uiautomator.Until
 import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Assume.assumeTrue
 import org.junit.Rule
@@ -98,7 +103,70 @@ class SafPlaybackInstrumentedTest {
             assertTrue("MediaSessionService did not connect", connected.await(15, TimeUnit.SECONDS))
             assertNotNull("MediaSessionService connect error: ${serviceError.get()}", servicePlayer.get())
             assertAdvances("Voltik service with PCM processor", { servicePlayer.get()!! }, serviceError)
+            verifyFocusReleasedAfterError(servicePlayer.get()!!, song.uri)
         } finally { instrumentation.runOnMainSync { controller.close() } }
+    }
+
+    private fun verifyFocusReleasedAfterError(volTik: Player, validUri: Uri) {
+        // Confirm the probe actually observed Voltik holding audio focus before
+        // provoking an IO error. This prevents a vacuous pass on an empty dump.
+        val before = focusStack()
+        assertTrue("Voltik should hold audio focus before error; focus stack: $before", before.contains("-- pack: ${context.packageName} "))
+        val gotError = CountDownLatch(1)
+        val failure = AtomicReference<String?>(null)
+        val listener = object : Player.Listener {
+            override fun onPlayerError(exception: PlaybackException) {
+                failure.set("${exception.errorCodeName}: ${exception.cause?.javaClass?.name}: ${exception.cause?.message}")
+                gotError.countDown()
+            }
+        }
+        val unavailable = Uri.parse(validUri.toString().replace("fixture.mp3", "missing-fixture.mp3"))
+        assertTrue("Fixture URI was not rewritten", unavailable != validUri)
+        instrumentation.runOnMainSync {
+            volTik.addListener(listener)
+            volTik.setMediaItem(MediaItem.fromUri(unavailable))
+            volTik.prepare()
+            volTik.play()
+        }
+        assertTrue("Expected an actual playback error for the missing file", gotError.await(15, TimeUnit.SECONDS))
+        val until = SystemClock.elapsedRealtime() + 10_000
+        var after = focusStack()
+        while (SystemClock.elapsedRealtime() < until && after.contains("-- pack: ${context.packageName} ")) {
+            SystemClock.sleep(100)
+            after = focusStack()
+        }
+        assertTrue("Voltik retained audio focus after ${failure.get()}; focus stack: $after", !after.contains("-- pack: ${context.packageName} "))
+
+        // A second requester must be able to obtain focus and render a real file.
+        // It has a separate AudioFocusRequest, although it shares this test UID.
+        val manager = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
+        val request = AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN)
+            .setAudioAttributes(AndroidAudioAttributes.Builder().setUsage(AndroidAudioAttributes.USAGE_MEDIA)
+                .setContentType(AndroidAudioAttributes.CONTENT_TYPE_MUSIC).build())
+            .setOnAudioFocusChangeListener { }
+            .build()
+        assertEquals("Second requester could not obtain focus", AudioManager.AUDIOFOCUS_REQUEST_GRANTED, manager.requestAudioFocus(request))
+        val competitorError = AtomicReference<String?>(null)
+        lateinit var competitor: ExoPlayer
+        instrumentation.runOnMainSync {
+            competitor = ExoPlayer.Builder(context).build()
+            competitor.addListener(errorListener("second player", competitorError))
+            competitor.setMediaItem(MediaItem.fromUri(validUri))
+            competitor.prepare()
+            competitor.play()
+        }
+        try { assertAdvances("Second player after Voltik error", { competitor }, competitorError) }
+        finally {
+            instrumentation.runOnMainSync { competitor.release(); volTik.removeListener(listener) }
+            manager.abandonAudioFocusRequest(request)
+        }
+    }
+
+    private fun focusStack(): String {
+        val dump = device.executeShellCommand("dumpsys audio")
+        val start = dump.indexOf("Audio Focus stack entries")
+        assertTrue("Audio focus stack missing from dumpsys audio", start >= 0)
+        return dump.substring(start).substringBefore("\n\n")
     }
 
     private fun errorListener(label: String, error: AtomicReference<String?>) = object : Player.Listener {

@@ -52,10 +52,7 @@ jobs:
             adb push /tmp/voltik-fixture.mp3 /sdcard/Music/VoltikSafFixture/fixture.mp3
             gradle --no-daemon -Pvoltik.ci.x86PlaybackOnly=true :app:assembleDebug :app:assembleDebugAndroidTest
             # This APK is only for x86 playback tests; never upload it for distribution.
-            if unzip -Z1 app/build/outputs/apk/debug/app-debug.apk | grep -E '^lib/(arm64-v8a|armeabi-v7a)/'; then
-              echo "::error::Unexpected ARM native library in x86 CI APK"
-              exit 1
-            fi
+            ! unzip -Z1 app/build/outputs/apk/debug/app-debug.apk | grep -Eq '^lib/(arm64-v8a|armeabi-v7a)/'
             adb install -r app/build/outputs/apk/debug/app-debug.apk
             gradle --no-daemon -Pvoltik.ci.x86PlaybackOnly=true :app:connectedDebugAndroidTest -Pandroid.testInstrumentationRunnerArguments.class=com.voltik.player.SafPlaybackInstrumentedTest,com.voltik.player.LevelAudioProcessorTest,com.voltik.player.LevelAudioPcmInstrumentedTest
             adb install -r app/build/outputs/apk/debug/app-debug.apk

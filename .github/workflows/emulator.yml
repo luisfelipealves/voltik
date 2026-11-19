@@ -45,8 +45,7 @@ jobs:
             adb push /tmp/voltik-fixture.mp3 /sdcard/Music/VoltikSafFixture/fixture.mp3
             gradle --no-daemon :app:assembleDebug :app:assembleDebugAndroidTest
             adb install -r app/build/outputs/apk/debug/app-debug.apk
-            adb shell pm grant com.voltik.player android.permission.POST_NOTIFICATIONS
-            gradle --no-daemon :app:connectedDebugAndroidTest -Pandroid.testInstrumentationRunnerArguments.class=com.voltik.player.SafPlaybackInstrumentedTest
+            gradle --no-daemon :app:connectedDebugAndroidTest -Pandroid.testInstrumentationRunnerArguments.class=com.voltik.player.SafPlaybackInstrumentedTest,com.voltik.player.LevelAudioProcessorTest
       - uses: actions/upload-artifact@v4
         if: always()
         with:

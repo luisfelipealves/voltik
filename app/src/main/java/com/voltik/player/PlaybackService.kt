@@ -1,9 +1,13 @@
 package com.voltik.player
 
 import android.content.Context
+import android.os.Handler
+import android.os.Looper
 import androidx.annotation.OptIn
 import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
+import androidx.media3.common.PlaybackException
+import androidx.media3.common.Player
 import androidx.media3.common.audio.AudioProcessor
 import androidx.media3.common.audio.BaseAudioProcessor
 import androidx.media3.common.util.UnstableApi
@@ -25,11 +29,15 @@ object PlaybackAudioLevel {
 }
 
 @OptIn(UnstableApi::class)
-private class LevelAudioProcessor : BaseAudioProcessor() {
+internal class LevelAudioProcessor : BaseAudioProcessor() {
     override fun onConfigure(inputAudioFormat: AudioProcessor.AudioFormat): AudioProcessor.AudioFormat =
         if (inputAudioFormat.encoding == C.ENCODING_PCM_16BIT) inputAudioFormat else AudioProcessor.AudioFormat.NOT_SET
 
     override fun queueInput(inputBuffer: ByteBuffer) {
+        // Media3 may call queueInput(EMPTY_BUFFER) while draining. Before any
+        // data has been processed, replaceOutputBuffer(0) returns the same
+        // shared EMPTY_BUFFER and put(inputBuffer) would copy a buffer to itself.
+        if (!inputBuffer.hasRemaining()) return
         val sampleBuffer = inputBuffer.duplicate().order(ByteOrder.LITTLE_ENDIAN)
         var sum = 0.0
         var count = 0
@@ -70,6 +78,15 @@ class PlaybackService : MediaSessionService() {
                 .setContentType(C.AUDIO_CONTENT_TYPE_MUSIC)
                 .build(), true)
             setHandleAudioBecomingNoisy(true)
+            addListener(object : Player.Listener {
+                override fun onPlayerError(error: PlaybackException) {
+                    // ExoPlayer's public stop() abandons audio focus. Defer to
+                    // allow the original error to reach the media controller.
+                    Handler(Looper.getMainLooper()).post {
+                        if (playerError != null) stop()
+                    }
+                }
+            })
         }
         session = MediaSession.Builder(this, player).build()
     }

@@ -1,11 +1,8 @@
 package com.voltik.player
 
-import android.Manifest
 import android.content.Intent
 import android.content.ActivityNotFoundException
-import android.content.pm.PackageManager
 import android.net.Uri
-import android.os.Build
 import android.os.Bundle
 import android.util.Log
 import android.view.WindowManager
@@ -15,7 +12,6 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
-import androidx.core.content.ContextCompat
 import androidx.media3.common.C
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
@@ -52,8 +48,6 @@ class MainActivity : ComponentActivity() {
             else message = "Não foi possível manter o acesso à pasta. Tente selecioná-la novamente."
         }
     }
-    private val notificationPermission = registerForActivityResult(ActivityResultContracts.RequestPermission()) { }
-
     private val listener = object : Player.Listener {
         override fun onEvents(player: Player, events: Player.Events) { updatePlayer() }
         override fun onIsPlayingChanged(isPlaying: Boolean) {
@@ -100,7 +94,7 @@ class MainActivity : ComponentActivity() {
                     setCompilation = { id, value -> library.setCompilation(id, value); refresh() },
                     togglePlay = {
                         mediaPlayer?.let { player ->
-                            if (player.playerError != null) {
+                            if (player.playerError != null || player.playbackState == Player.STATE_IDLE) {
                                 playbackMessage = null
                                 player.prepare()
                                 player.play()
@@ -193,9 +187,6 @@ class MainActivity : ComponentActivity() {
 
     private fun startAlbum(album: UiAlbum, index: Int) {
         if (mediaPlayer == null) { playbackMessage = "O player ainda está iniciando. Tente novamente."; return }
-        if (Build.VERSION.SDK_INT >= 33 && ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
-            notificationPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
-        }
         try {
             playbackMessage = null
             playback.playAlbum(album.songs.map { PlaybackTrack(it.uri, it.title, it.artist, album.title) }, index)
@@ -219,7 +210,9 @@ class MainActivity : ComponentActivity() {
             title = p.mediaMetadata.title?.toString().orEmpty(),
             artist = p.mediaMetadata.artist?.toString().orEmpty(),
             durationMs = duration, positionMs = p.currentPosition.coerceAtLeast(0),
-            playing = p.playerError == null && p.playWhenReady && p.playbackState != Player.STATE_ENDED, shuffle = p.shuffleModeEnabled,
+            playing = p.playerError == null && p.playWhenReady &&
+                p.playbackState != Player.STATE_ENDED && p.playbackState != Player.STATE_IDLE,
+            shuffle = p.shuffleModeEnabled,
             repeatMode = p.repeatMode,
             audioLevel = if (p.isPlaying) PlaybackAudioLevel.value else 0f
         )

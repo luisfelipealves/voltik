@@ -29,7 +29,7 @@ fun VoltikVisualizer(audioLevel: Float, playing: Boolean, modifier: Modifier = M
     // The level arrives less frequently than display frames; interpolate to avoid visible steps.
     val level by animateFloatAsState(
         targetValue = if (playing && audioLevel.isFinite()) audioLevel.coerceIn(0f, 1f) else 0f,
-        animationSpec = tween(180), label = "audio level"
+        animationSpec = tween(70), label = "audio level"
     )
     var time by remember { mutableFloatStateOf(0f) }
     LaunchedEffect(playing) {
@@ -55,11 +55,11 @@ fun VoltikVisualizer(audioLevel: Float, playing: Boolean, modifier: Modifier = M
         // Fine concentric traces provide depth without gradients or a solid filled disc.
         for (ring in 0 until 3) {
             val path = Path()
-            val radius = unit * (0.18f + ring * 0.042f + strength * 0.025f)
+            val radius = unit * (0.18f + ring * 0.042f + strength * 0.075f)
             for (point in 0..160) {
                 val angle = 2f * PI.toFloat() * point / 160f
-                val drift = sin(angle * (3 + ring) + time * (0.55f + ring * 0.13f)) * (0.008f + strength * 0.035f)
-                val ripple = sin(angle * (7 + ring * 2) - time * 0.9f) * strength * 0.012f
+                val drift = sin(angle * (3 + ring) + time * (0.55f + ring * 0.13f)) * (0.008f + strength * 0.085f)
+                val ripple = sin(angle * (7 + ring * 2) - time * 0.9f) * strength * 0.025f
                 val r = radius + unit * (drift + ripple)
                 val x = center.x + r * cos(angle)
                 val y = center.y + r * sin(angle)
@@ -75,7 +75,7 @@ fun VoltikVisualizer(audioLevel: Float, playing: Boolean, modifier: Modifier = M
             val angle = 2f * PI.toFloat() * i / 48f + time * 0.025f
             val wave = (sin(i * 1.7f + time * 1.1f) + 1f) / 2f
             val inner = unit * 0.34f
-            val length = unit * (0.005f + strength * 0.018f * wave)
+            val length = unit * (0.005f + strength * 0.040f * wave)
             val direction = Offset(cos(angle), sin(angle))
             drawLine(if (i % 4 == 0) lime else cyan,
                 center + direction * inner, center + direction * (inner + length),

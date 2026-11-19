@@ -274,7 +274,7 @@ class MainActivity : ComponentActivity() {
         tickJob = scope.launch {
             while (isActive) {
                 updatePlayer()
-                delay(200)
+                delay(50)
             }
         }
     }
@@ -287,6 +287,7 @@ class MainActivity : ComponentActivity() {
     private fun folderLabel(uri: Uri): String = Uri.decode(uri.lastPathSegment.orEmpty()).substringAfterLast('/').substringAfterLast(':').ifBlank { "Pasta de músicas" }
 
     override fun onDestroy() {
+        if (isFinishing) mediaPlayer?.stop()
         scanJob?.cancel()
         tickJob?.cancel()
         mediaPlayer?.removeListener(listener)

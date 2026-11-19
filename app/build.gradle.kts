@@ -2,7 +2,7 @@ plugins { id("com.android.application"); id("org.jetbrains.kotlin.android"); id(
 android {
  namespace = "com.voltik.player"
  compileSdk = 35
- defaultConfig { applicationId = "com.voltik.player"; minSdk = 26; targetSdk = 35; versionCode = 6; versionName = "0.1.5-experimental"; testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner" }
+ defaultConfig { applicationId = "com.voltik.player"; minSdk = 26; targetSdk = 35; versionCode = 7; versionName = "0.1.6-experimental"; testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner" }
  if (System.getenv("CI") == "true") {
   signingConfigs {
    getByName("debug") {

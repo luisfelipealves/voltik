@@ -1,6 +1,7 @@
 package com.voltik.player
 
 import android.content.Context
+import android.content.Intent
 import android.os.Handler
 import android.os.Looper
 import androidx.annotation.OptIn
@@ -75,7 +76,7 @@ internal class LevelAudioProcessor : BaseAudioProcessor() {
     }
 }
 
-/** Owns the player and media session so playback continues when the UI closes. */
+/** Keeps playback alive in the background, and stops when the app task is removed. */
 @OptIn(UnstableApi::class)
 class PlaybackService : MediaSessionService() {
     private var session: MediaSession? = null
@@ -111,6 +112,12 @@ class PlaybackService : MediaSessionService() {
     }
 
     override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaSession? = session
+
+    override fun onTaskRemoved(rootIntent: Intent?) {
+        session?.player?.stop()
+        stopSelf()
+        super.onTaskRemoved(rootIntent)
+    }
 
     override fun onDestroy() {
         session?.run { player.release(); release() }

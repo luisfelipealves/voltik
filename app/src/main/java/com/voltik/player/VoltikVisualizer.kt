@@ -67,13 +67,13 @@ fun VoltikVisualizer(audioLevel: Float, playing: Boolean, modifier: Modifier = M
             val radius = unit * (0.18f + ring * 0.042f + strength * 0.075f)
             for (point in 0..160) {
                 val angle = 2f * PI.toFloat() * point / 160f
-                val drift = sin(angle * (3 + ring) + time * (0.55f + ring * 0.13f)) * (0.008f + strength * 0.085f)
-                val ripple = sin(angle * (7 + ring * 2) - time * 0.9f) * strength * 0.025f
-                // Use the player's actual PCM waveform, with a smooth seam at the top.
-                val sample = if (waveform.isNotEmpty()) waveform[(point * (waveform.size - 1) / 160).coerceIn(0, waveform.size - 1)] else 0f
-                val seam = sin(PI.toFloat() * point / 160f).coerceAtLeast(0f)
-                val soundWave = kotlin.math.tanh(sample * 3.5f) * seam * (if (ring == 1) 0.14f else 0.075f)
-                val r = radius + unit * (drift + ripple + soundWave)
+                // Mirror the captured audio across the axes so the orbit stays balanced.
+                val drift = cos(angle * (4 + ring * 2)) * sin(time * (0.55f + ring * 0.13f)) * (0.008f + strength * 0.035f)
+                val ripple = cos(angle * (8 + ring * 2)) * sin(time * 0.9f) * strength * 0.018f
+                val position = kotlin.math.abs(cos(angle))
+                val sample = if (playing && waveform.isNotEmpty()) waveform[(position * (waveform.size - 1)).toInt().coerceIn(0, waveform.size - 1)] else 0f
+                val soundWave = kotlin.math.tanh(sample * 3.5f) * (if (ring == 1) 0.14f else 0.075f)
+                val r = (radius + unit * (drift + ripple + soundWave)).coerceIn(unit * 0.10f, unit * 0.46f)
                 val x = center.x + r * cos(angle)
                 val y = center.y + r * sin(angle)
                 if (point == 0) path.moveTo(x, y) else path.lineTo(x, y)

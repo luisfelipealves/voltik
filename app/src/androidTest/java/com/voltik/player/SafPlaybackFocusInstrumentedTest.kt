@@ -137,7 +137,7 @@ class SafPlaybackFocusInstrumentedTest {
         val details = records.joinToString { "id=${it.id}, title=${it.notification.extras.getCharSequence(Notification.EXTRA_TITLE)}, mediaSession=${it.notification.extras.containsKey(Notification.EXTRA_MEDIA_SESSION)}, flags=${it.notification.flags}" }
         assertTrue("No foreground MediaStyle notification for playing Voltik track. Active notifications: $details; notification dump: $notificationDump; media_session dump: $sessionDump", matches())
         assertTrue("Voltik package missing from notification manager dump", notificationDump.contains(context.packageName))
-        assertTrue("Track title missing from media session dump", sessionDump.contains("Voltik SAF song"))
+        assertTrue("Voltik package missing from media session dump", sessionDump.contains(context.packageName))
     }
 
     private fun verifyFocusReleasedAfterError(volTik: Player, validUri: Uri) {

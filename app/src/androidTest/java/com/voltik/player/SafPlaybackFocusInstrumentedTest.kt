@@ -1,5 +1,7 @@
 package com.voltik.player
 
+import android.app.Notification
+import android.app.NotificationManager
 import android.content.Context
 import android.media.AudioAttributes as AndroidAudioAttributes
 import android.media.AudioFocusRequest
@@ -45,7 +47,7 @@ class SafPlaybackFocusInstrumentedTest {
     private val device = UiDevice.getInstance(instrumentation)
     private val context: Context get() = instrumentation.targetContext
 
-    @Test fun realSafErrorReleasesFocusAndAnotherPlayerPlays() {
+    @Test fun realSafMp3PlaysDirectlyAndThroughVoltikService() {
         // The helper workflow provisions a disposable Android emulator only.
         assumeTrue("Use only the disposable emulator fixture", Build.FINGERPRINT.contains("generic") || Build.HARDWARE.contains("ranchu") || Build.PRODUCT.contains("sdk_gphone"))
 
@@ -102,9 +104,40 @@ class SafPlaybackFocusInstrumentedTest {
         try {
             assertTrue("MediaSessionService did not connect", connected.await(15, TimeUnit.SECONDS))
             assertNotNull("MediaSessionService connect error: ${serviceError.get()}", servicePlayer.get())
+            // The fixture is only two seconds long; keep real playback active while
+            // SystemUI publishes and the notification is inspected.
+            instrumentation.runOnMainSync {
+                servicePlayer.get()!!.repeatMode = Player.REPEAT_MODE_ONE
+                servicePlayer.get()!!.seekTo(0)
+                servicePlayer.get()!!.play()
+            }
             assertAdvances("Voltik service with PCM processor", { servicePlayer.get()!! }, serviceError)
+            assertActiveMediaNotification()
             verifyFocusReleasedAfterError(servicePlayer.get()!!, song.uri)
         } finally { instrumentation.runOnMainSync { controller.close() } }
+    }
+
+    /** Assert the real service publishes an OS-recognized media notification during playback. */
+    private fun assertActiveMediaNotification() {
+        val manager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        val until = SystemClock.elapsedRealtime() + 15_000
+        var records = manager.activeNotifications.toList()
+        fun matches(): Boolean = records.any { record ->
+            val n = record.notification
+            n.extras.getCharSequence(Notification.EXTRA_TITLE)?.toString() == "Voltik SAF song" &&
+                n.extras.containsKey(Notification.EXTRA_MEDIA_SESSION) &&
+                (n.flags and Notification.FLAG_FOREGROUND_SERVICE) != 0
+        }
+        while (SystemClock.elapsedRealtime() < until && !matches()) {
+            SystemClock.sleep(100)
+            records = manager.activeNotifications.toList()
+        }
+        val notificationDump = device.executeShellCommand("dumpsys notification --noredact")
+        val sessionDump = device.executeShellCommand("dumpsys media_session")
+        val details = records.joinToString { "id=${it.id}, title=${it.notification.extras.getCharSequence(Notification.EXTRA_TITLE)}, mediaSession=${it.notification.extras.containsKey(Notification.EXTRA_MEDIA_SESSION)}, flags=${it.notification.flags}" }
+        assertTrue("No foreground MediaStyle notification for playing Voltik track. Active notifications: $details; notification dump: $notificationDump; media_session dump: $sessionDump", matches())
+        assertTrue("Voltik package missing from notification manager dump", notificationDump.contains(context.packageName))
+        assertTrue("Track title missing from media session dump", sessionDump.contains("Voltik SAF song"))
     }
 
     private fun verifyFocusReleasedAfterError(volTik: Player, validUri: Uri) {

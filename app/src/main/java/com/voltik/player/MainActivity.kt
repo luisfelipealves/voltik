@@ -287,7 +287,6 @@ class MainActivity : ComponentActivity() {
     private fun folderLabel(uri: Uri): String = Uri.decode(uri.lastPathSegment.orEmpty()).substringAfterLast('/').substringAfterLast(':').ifBlank { "Pasta de músicas" }
 
     override fun onDestroy() {
-        if (isFinishing) mediaPlayer?.stop()
         scanJob?.cancel()
         tickJob?.cancel()
         mediaPlayer?.removeListener(listener)

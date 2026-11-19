@@ -37,7 +37,7 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.testTag
-import androidx.compose.ui.platform.LocalAccessibilityManager
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.semantics.onClick
@@ -313,7 +313,14 @@ fun VoltikApp(
     var interactionEpoch by remember { mutableIntStateOf(0) }
     var fingerDown by remember { mutableStateOf(false) }
     var visualDialogOpen by remember { mutableStateOf(false) }
-    val touchExploration = LocalAccessibilityManager.current?.isTouchExplorationEnabled == true
+    val context = LocalContext.current
+    val accessibility = remember(context) { context.getSystemService(android.content.Context.ACCESSIBILITY_SERVICE) as android.view.accessibility.AccessibilityManager }
+    var touchExploration by remember(accessibility) { mutableStateOf(accessibility.isTouchExplorationEnabled) }
+    DisposableEffect(accessibility) {
+        val listener = android.view.accessibility.AccessibilityManager.TouchExplorationStateChangeListener { enabled -> touchExploration = enabled }
+        accessibility.addTouchExplorationStateChangeListener(listener)
+        onDispose { accessibility.removeTouchExplorationStateChangeListener(listener) }
+    }
     LaunchedEffect(player.playing, interactionEpoch, fingerDown, visualDialogOpen, visualState?.busy, touchExploration) {
         if (!player.playing || touchExploration) controlsVisible = true
         else if (!fingerDown && !visualDialogOpen && visualState?.busy != true) {
@@ -348,11 +355,9 @@ fun VoltikApp(
             if (visualState?.activePresetId != null && projectMContent != null) projectMContent()
             else VoltikVisualizer(player.audioLevel, player.playing)
         }
-        AnimatedVisibility(
+        HideablePlayerOverlay(
             visible = controlsVisible,
-            modifier = Modifier.align(Alignment.TopCenter),
-            enter = EnterTransition.None,
-            exit = slideOutVertically(animationSpec = tween(350), targetOffsetY = { it }) + fadeOut(animationSpec = tween(350))
+            modifier = Modifier.align(Alignment.TopCenter)
         ) {
             Column(Modifier.fillMaxWidth().background(Ink.copy(alpha = 0.94f))) {
                 Header("Tocando agora", back, Modifier.testTag("player-screen"))
@@ -361,11 +366,9 @@ fun VoltikApp(
                 if (visualState?.activePresetId != null && projectMContent == null) Text("Visual importado indisponível; exibindo Órbita Voltik.", Modifier.fillMaxWidth().semantics { liveRegion = LiveRegionMode.Polite }.padding(horizontal = 20.dp), color = Color.White, style = MaterialTheme.typography.bodyMedium)
             }
         }
-        AnimatedVisibility(
+        HideablePlayerOverlay(
             visible = controlsVisible,
-            modifier = Modifier.align(Alignment.BottomCenter),
-            enter = EnterTransition.None,
-            exit = slideOutVertically(animationSpec = tween(350), targetOffsetY = { it }) + fadeOut(animationSpec = tween(350))
+            modifier = Modifier.align(Alignment.BottomCenter)
         ) {
     Column(Modifier.fillMaxWidth().background(Ink.copy(alpha = 0.94f)).padding(horizontal = 24.dp)) {
         Text(player.title.ifBlank { "Nenhuma música" }, color = Color.White, style = MaterialTheme.typography.headlineSmall, maxLines = 2, overflow = TextOverflow.Ellipsis)
@@ -383,6 +386,16 @@ fun VoltikApp(
     }
         }
     }
+}
+
+@Composable
+private fun HideablePlayerOverlay(visible: Boolean, modifier: Modifier = Modifier, content: @Composable () -> Unit) {
+    AnimatedVisibility(
+        visible = visible,
+        modifier = modifier,
+        enter = EnterTransition.None,
+        exit = slideOutVertically(animationSpec = tween(350), targetOffsetY = { it }) + fadeOut(animationSpec = tween(350))
+    ) { content() }
 }
 
 @Composable private fun Orbit(level: Float, playing: Boolean) {

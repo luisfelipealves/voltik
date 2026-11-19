@@ -15,6 +15,7 @@ class MusicLibrary(context: Context) {
     private val app = context.applicationContext
     private val resolver = app.contentResolver
     private val prefs = app.getSharedPreferences("voltik_library", Context.MODE_PRIVATE)
+    private val cache = MusicLibraryCache(app)
 
     data class Song(
         val uri: Uri,
@@ -41,6 +42,33 @@ class MusicLibrary(context: Context) {
         val albums: List<Album>,
         val inaccessibleFolders: List<Uri>,
     )
+
+    data class CachedResult(val result: ScanResult, val coversAllFolders: Boolean)
+
+    /** Fast startup snapshot, or null when no valid snapshot exists. */
+    fun loadCached(): CachedResult? {
+        val snapshot = cache.load() ?: return null
+        val currentRoots = folders().map(Uri::toString).toSet()
+        val treeIds = currentRoots.mapNotNull { MusicLibraryCache.treeIdentity(Uri.parse(it)) }.toSet()
+        val songs = snapshot.songs.filter { MusicLibraryCache.treeIdentity(it.uri) in treeIds }
+        val grantedTreeIds = resolver.persistedUriPermissions.filter { it.isReadPermission }
+            .mapNotNull { MusicLibraryCache.treeIdentity(it.uri) }.toSet()
+        val inaccessible = currentRoots.map(Uri::parse).filter {
+            MusicLibraryCache.treeIdentity(it) !in grantedTreeIds
+        }
+        return CachedResult(groupSongs(songs, inaccessible), snapshot.roots == currentRoots)
+    }
+
+    /**
+     * Writes only successful complete scans for the same folder selection. The
+     * caller must run on IO, ensure the coroutine is active and pass its captured roots.
+     * Partial/inaccessible scans never overwrite the last known-good snapshot.
+     */
+    fun saveCached(result: ScanResult, rootsAtStart: List<Uri>): Boolean {
+        val roots = rootsAtStart.map(Uri::toString).toSet()
+        if (result.inaccessibleFolders.isNotEmpty() || folders().map(Uri::toString).toSet() != roots) return false
+        return cache.save(roots, result.songs)
+    }
 
     fun folders(): List<Uri> = prefs.getStringSet("folders", emptySet()).orEmpty()
         .sorted().map(Uri::parse)
@@ -115,6 +143,23 @@ class MusicLibrary(context: Context) {
                 inaccessible.add(tree)
             }
         }
+        // Keep the last known songs when a selected root is temporarily inaccessible.
+        if (inaccessible.isNotEmpty()) {
+            val missingRoots = inaccessible.mapNotNull(MusicLibraryCache::treeIdentity).toSet()
+            val foundIds = found.mapNotNull { song ->
+                try { song.uri.authority.orEmpty() + ":" + DocumentsContract.getDocumentId(song.uri) } catch (_: Exception) { null }
+            }.toMutableSet()
+            loadCached()?.result?.songs?.filter {
+                MusicLibraryCache.treeIdentity(it.uri) in missingRoots
+            }?.forEach { song ->
+                val key = try { song.uri.authority.orEmpty() + ":" + DocumentsContract.getDocumentId(song.uri) } catch (_: Exception) { song.uri.toString() }
+                if (foundIds.add(key)) found.add(song)
+            }
+        }
+        return groupSongs(found, inaccessible)
+    }
+
+    private fun groupSongs(found: List<Song>, inaccessible: List<Uri>): ScanResult {
         // Album artist distinguishes same-titled albums sharing one folder. A
         // missing album artist joins the sole explicit album artist in that folder;
         // ambiguous metadata stays in its own album rather than being guessed.
@@ -204,3 +249,4 @@ class MusicLibrary(context: Context) {
         const val UNKNOWN_ALBUM = "Álbum desconhecido"
     }
 }
+

@@ -11,6 +11,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -47,8 +48,9 @@ data class VisualUiActions(
  * do sistema ou inicialização nativa acontece só por renderizar o seletor.
  */
 @Composable
-fun VisualPicker(state: VisualUiState, actions: VisualUiActions) {
+fun VisualPicker(state: VisualUiState, actions: VisualUiActions, onOpenChange: (Boolean) -> Unit = {}) {
     var open by remember { mutableStateOf(false) }
+    LaunchedEffect(open) { onOpenChange(open) }
     val current = state.presets.firstOrNull { it.id == state.activePresetId }?.name
     TextButton(onClick = { open = true }) {
         Text(if (state.activePresetId == null) "Visual: Voltik" else "Visual: ${current ?: "preset importado"}", maxLines = 1)
@@ -77,3 +79,4 @@ fun VisualPicker(state: VisualUiState, actions: VisualUiActions) {
         )
     }
 }
+

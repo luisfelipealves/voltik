@@ -47,7 +47,8 @@ class MainActivity : ComponentActivity() {
     private var playbackMessage by mutableStateOf<String?>(null)
     private var scanJob: Job? = null
     private var tickJob: Job? = null
-    private var periodicScanJob: Job? = null
+    private var cacheJob: Job? = null
+    private var startupCacheLoaded = false
     private val scanMutex = Mutex()
     private var activityActive = false
     // Picker results are delivered before onResume. The result already initiates
@@ -134,7 +135,7 @@ class MainActivity : ComponentActivity() {
                     removeFolder = { uri -> library.removeFolder(Uri.parse(uri)); refresh() },
                     refresh = { refresh() },
                     playSong = { album, index -> startAlbum(album, index) },
-                    setCompilation = { id, value -> library.setCompilation(id, value); refresh() },
+                    setCompilation = { id, value -> updateCompilation(id, value) },
                     togglePlay = {
                         mediaPlayer?.let { player ->
                             if (player.playerError != null || player.playbackState == Player.STATE_IDLE) {
@@ -183,13 +184,10 @@ class MainActivity : ComponentActivity() {
         activityActive = true
         startTicker()
         if (::library.isInitialized) {
-            if (pickerResultHandled) pickerResultHandled = false else refresh()
-            periodicScanJob?.cancel()
-            periodicScanJob = scope.launch {
-                while (isActive) {
-                    delay(300_000)
-                    if (!scanning && folders.isNotEmpty()) refresh()
-                }
+            if (pickerResultHandled) pickerResultHandled = false
+            if (!startupCacheLoaded) {
+                startupCacheLoaded = true
+                loadLibraryOnStartup()
             }
         }
     }
@@ -198,14 +196,70 @@ class MainActivity : ComponentActivity() {
         activityActive = false
         tickJob?.cancel()
         tickJob = null
-        periodicScanJob?.cancel()
-        periodicScanJob = null
         super.onPause()
     }
 
+    /** Load the last successful snapshot before considering any scan. */
+    private fun loadLibraryOnStartup() {
+        val roots = library.folders()
+        folders = roots.map { UiFolder(it.toString(), folderLabel(it)) }
+        if (roots.isEmpty()) {
+            albums = emptyList()
+            scanning = false
+            return
+        }
+        cacheJob?.cancel()
+        scanning = true
+        cacheJob = scope.launch {
+            try {
+                val cached = withContext(Dispatchers.IO) { library.loadCached() }
+                if (roots.toSet() != library.folders().toSet()) return@launch
+                if (cached != null) {
+                    albums = cached.result.albums.map(::toUiAlbum)
+                    message = if (cached.result.inaccessibleFolders.isNotEmpty())
+                        "Não foi possível acessar ${cached.result.inaccessibleFolders.size} pasta(s). Remova e adicione novamente nas configurações."
+                    else null
+                    if (cached.coversAllFolders) {
+                        scanning = false
+                        return@launch
+                    }
+                }
+                // No snapshot, corrupted snapshot, or newly added folder.
+                refresh()
+            } catch (e: CancellationException) {
+                throw e
+            } catch (_: Exception) {
+                refresh()
+            }
+        }
+    }
+
+    private fun updateCompilation(id: String, value: Boolean?) {
+        library.setCompilation(id, value)
+        // Reclassify the saved song metadata, without rereading every MP3.
+        cacheJob?.cancel()
+        cacheJob = scope.launch {
+            val cached = withContext(Dispatchers.IO) { library.loadCached() }
+            if (cached != null && cached.coversAllFolders && !scanning) {
+                albums = cached.result.albums.map(::toUiAlbum)
+            } else {
+                refresh()
+            }
+        }
+    }
+
+    private fun toUiAlbum(album: MusicLibrary.Album): UiAlbum =
+        UiAlbum(album.id, album.title, album.artist, album.songs.map { song ->
+            UiSong(song.uri.toString(), song.title, song.artist, song.durationMs)
+        }, album.isCompilation)
+
     private fun refresh() {
+        startupCacheLoaded = true
+        cacheJob?.cancel()
+        cacheJob = null
         scanJob?.cancel()
-        folders = library.folders().map { UiFolder(it.toString(), folderLabel(it)) }
+        val roots = library.folders()
+        folders = roots.map { UiFolder(it.toString(), folderLabel(it)) }
         if (folders.isEmpty()) {
             albums = emptyList()
             scanning = false
@@ -216,12 +270,16 @@ class MainActivity : ComponentActivity() {
         message = null
         scanJob = scope.launch {
             try {
-                val result = withContext(Dispatchers.IO) { scanMutex.withLock { library.scan() } }
-                albums = result.albums.map { album ->
-                    UiAlbum(album.id, album.title, album.artist, album.songs.map { song ->
-                        UiSong(song.uri.toString(), song.title, song.artist, song.durationMs)
-                    }, album.isCompilation)
+                val result = withContext(Dispatchers.IO) {
+                    scanMutex.withLock {
+                        val fresh = library.scan()
+                        currentCoroutineContext().ensureActive()
+                        // A failed, partial or outdated scan cannot replace the good cache.
+                        library.saveCached(fresh, roots)
+                        fresh
+                    }
                 }
+                albums = result.albums.map(::toUiAlbum)
                 message = if (result.inaccessibleFolders.isNotEmpty())
                     "Não foi possível acessar ${result.inaccessibleFolders.size} pasta(s). Remova e adicione novamente nas configurações."
                 else if (result.songs.isEmpty()) "Nenhum arquivo MP3 encontrado nas pastas selecionadas." else null
@@ -288,6 +346,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onDestroy() {
         scanJob?.cancel()
+        cacheJob?.cancel()
         tickJob?.cancel()
         mediaPlayer?.removeListener(listener)
         playback.close()
@@ -295,3 +354,4 @@ class MainActivity : ComponentActivity() {
         super.onDestroy()
     }
 }
+

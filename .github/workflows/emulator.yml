@@ -55,7 +55,7 @@ jobs:
             # This APK is only for x86 playback tests; never upload it for distribution.
             ! unzip -Z1 app/build/outputs/apk/debug/app-debug.apk | grep -Eq '^lib/(arm64-v8a|armeabi-v7a)/'
             adb install -r app/build/outputs/apk/debug/app-debug.apk
-            gradle --no-daemon -Pvoltik.ci.x86PlaybackOnly=true :app:connectedDebugAndroidTest -Pandroid.testInstrumentationRunnerArguments.class=com.voltik.player.SafPlaybackInstrumentedTest,com.voltik.player.LevelAudioProcessorTest,com.voltik.player.LevelAudioPcmInstrumentedTest
+            gradle --no-daemon -Pvoltik.ci.x86PlaybackOnly=true :app:connectedDebugAndroidTest -Pandroid.testInstrumentationRunnerArguments.class=com.voltik.player.SafPlaybackInstrumentedTest,com.voltik.player.LevelAudioProcessorTest,com.voltik.player.LevelAudioPcmInstrumentedTest,com.voltik.player.MusicLibraryCacheTest,com.voltik.player.PlayerControlsTest
             adb install -r app/build/outputs/apk/debug/app-debug.apk
             adb shell pm clear com.voltik.player
             gradle --no-daemon -Pvoltik.ci.x86PlaybackOnly=true :app:connectedDebugAndroidTest -Pandroid.testInstrumentationRunnerArguments.class=com.voltik.player.SafPlaybackFocusInstrumentedTest

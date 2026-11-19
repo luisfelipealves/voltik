@@ -3,6 +3,10 @@ package com.voltik.player.ui
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.util.LruCache
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.EnterTransition
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideOutVertically
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
@@ -33,6 +37,10 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.platform.LocalAccessibilityManager
+import androidx.compose.ui.input.pointer.PointerEventPass
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.semantics.onClick
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.liveRegion
@@ -301,15 +309,65 @@ fun VoltikApp(
 }
 
 @Composable private fun ColumnScope.PlayerScreen(player: UiPlayer, back: () -> Unit, actions: UiActions, visualState: VisualUiState?, visualActions: VisualUiActions?, projectMContent: (@Composable () -> Unit)?) {
-    Header("Tocando agora", back, Modifier.testTag("player-screen"))
-    if (visualState != null && visualActions != null) VisualPicker(visualState, visualActions)
-    if (!visualState?.message.isNullOrBlank()) Text(visualState!!.message!!, Modifier.fillMaxWidth().semantics { liveRegion = LiveRegionMode.Polite }.padding(horizontal = 20.dp), color = Color.White, style = MaterialTheme.typography.bodyMedium)
-    if (visualState?.activePresetId != null && projectMContent == null) Text("Visual importado indisponível; exibindo Órbita Voltik.", Modifier.fillMaxWidth().semantics { liveRegion = LiveRegionMode.Polite }.padding(horizontal = 20.dp), color = Color.White, style = MaterialTheme.typography.bodyMedium)
-    Box(Modifier.weight(1f).fillMaxWidth().padding(24.dp), contentAlignment = Alignment.Center) {
-        if (visualState?.activePresetId != null && projectMContent != null) projectMContent()
-        else VoltikVisualizer(player.audioLevel, player.playing)
+    var controlsVisible by remember { mutableStateOf(true) }
+    var interactionEpoch by remember { mutableIntStateOf(0) }
+    var fingerDown by remember { mutableStateOf(false) }
+    var visualDialogOpen by remember { mutableStateOf(false) }
+    val touchExploration = LocalAccessibilityManager.current?.isTouchExplorationEnabled == true
+    LaunchedEffect(player.playing, interactionEpoch, fingerDown, visualDialogOpen, visualState?.busy, touchExploration) {
+        if (!player.playing || touchExploration) controlsVisible = true
+        else if (!fingerDown && !visualDialogOpen && visualState?.busy != true) {
+            kotlinx.coroutines.delay(5000)
+            controlsVisible = false
+        }
     }
-    Column(Modifier.fillMaxWidth().padding(horizontal = 24.dp)) {
+    Box(
+        Modifier.weight(1f).fillMaxWidth().testTag("visual-surface")
+            .pointerInput(Unit) {
+                awaitPointerEventScope {
+                    while (true) {
+                        val event = awaitPointerEvent(PointerEventPass.Initial)
+                        val pressed = event.changes.any { it.pressed }
+                        fingerDown = pressed
+                        if (pressed) {
+                            interactionEpoch++
+                            controlsVisible = true
+                        }
+                    }
+                }
+            }
+            .semantics {
+                if (!controlsVisible) onClick(label = "Mostrar controles") {
+                    controlsVisible = true
+                    interactionEpoch++
+                    true
+                }
+            }
+    ) {
+        Box(Modifier.fillMaxSize().padding(24.dp), contentAlignment = Alignment.Center) {
+            if (visualState?.activePresetId != null && projectMContent != null) projectMContent()
+            else VoltikVisualizer(player.audioLevel, player.playing)
+        }
+        AnimatedVisibility(
+            visible = controlsVisible,
+            modifier = Modifier.align(Alignment.TopCenter),
+            enter = EnterTransition.None,
+            exit = slideOutVertically(animationSpec = tween(350), targetOffsetY = { it }) + fadeOut(animationSpec = tween(350))
+        ) {
+            Column(Modifier.fillMaxWidth().background(Ink.copy(alpha = 0.94f))) {
+                Header("Tocando agora", back, Modifier.testTag("player-screen"))
+                if (visualState != null && visualActions != null) VisualPicker(visualState, visualActions) { visualDialogOpen = it }
+                if (!visualState?.message.isNullOrBlank()) Text(visualState!!.message!!, Modifier.fillMaxWidth().semantics { liveRegion = LiveRegionMode.Polite }.padding(horizontal = 20.dp), color = Color.White, style = MaterialTheme.typography.bodyMedium)
+                if (visualState?.activePresetId != null && projectMContent == null) Text("Visual importado indisponível; exibindo Órbita Voltik.", Modifier.fillMaxWidth().semantics { liveRegion = LiveRegionMode.Polite }.padding(horizontal = 20.dp), color = Color.White, style = MaterialTheme.typography.bodyMedium)
+            }
+        }
+        AnimatedVisibility(
+            visible = controlsVisible,
+            modifier = Modifier.align(Alignment.BottomCenter),
+            enter = EnterTransition.None,
+            exit = slideOutVertically(animationSpec = tween(350), targetOffsetY = { it }) + fadeOut(animationSpec = tween(350))
+        ) {
+    Column(Modifier.fillMaxWidth().background(Ink.copy(alpha = 0.94f)).padding(horizontal = 24.dp)) {
         Text(player.title.ifBlank { "Nenhuma música" }, color = Color.White, style = MaterialTheme.typography.headlineSmall, maxLines = 2, overflow = TextOverflow.Ellipsis)
         Text(player.artist, color = Secondary)
         val duration = player.durationMs.coerceAtLeast(0)
@@ -321,6 +379,8 @@ fun VoltikApp(
             IconButton(onClick = actions.togglePlay, modifier = Modifier.size(52.dp).clip(RoundedCornerShape(50)).background(Accent).semantics { contentDescription = if (player.playing) "Pausar" else "Tocar" }) { Text(if (player.playing) "Ⅱ" else "▶", color = Ink, fontSize = 22.sp) }
             IconButton(onClick = actions.next, modifier = Modifier.semantics { contentDescription = "Próxima faixa" }) { Text("⏭", color = Color.White, fontSize = 20.sp) }
             IconButton(onClick = actions.cycleRepeat, modifier = Modifier.semantics { contentDescription = when (player.repeatMode) { 1 -> "Repetindo faixa"; 2 -> "Repetindo álbum"; else -> "Repetição desligada" } }) { Text(if (player.repeatMode == 1) "↻¹" else "↻", color = if (player.repeatMode != 0) Accent else Secondary, fontSize = 22.sp) }
+        }
+    }
         }
     }
 }
@@ -339,3 +399,4 @@ fun VoltikApp(
 }
 
 private fun formatTime(ms: Long): String { val s = ms.coerceAtLeast(0) / 1000; return "%d:%02d".format(s / 60, s % 60) }
+

@@ -5,9 +5,11 @@ import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.withFrameNanos
@@ -18,6 +20,7 @@ import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import kotlinx.coroutines.delay
+import com.voltik.player.PlaybackPcmCapture
 import kotlin.math.PI
 import kotlin.math.cos
 import kotlin.math.min
@@ -32,6 +35,11 @@ fun VoltikVisualizer(audioLevel: Float, playing: Boolean, modifier: Modifier = M
         animationSpec = tween(70), label = "audio level"
     )
     var time by remember { mutableFloatStateOf(0f) }
+    var waveform by remember { mutableStateOf(FloatArray(0)) }
+    DisposableEffect(playing) {
+        PlaybackPcmCapture.tap.setEnabled(playing)
+        onDispose { PlaybackPcmCapture.tap.setEnabled(false) }
+    }
     LaunchedEffect(playing) {
         if (playing) {
             var lastFrame = 0L
@@ -39,6 +47,7 @@ fun VoltikVisualizer(audioLevel: Float, playing: Boolean, modifier: Modifier = M
                 withFrameNanos { now ->
                     if (lastFrame != 0L) time += ((now - lastFrame) / 1_000_000_000f).coerceAtMost(0.1f)
                     lastFrame = now
+                    waveform = PlaybackPcmCapture.tap.snapshot(1024)
                 }
                 delay(25)
             }
@@ -60,7 +69,11 @@ fun VoltikVisualizer(audioLevel: Float, playing: Boolean, modifier: Modifier = M
                 val angle = 2f * PI.toFloat() * point / 160f
                 val drift = sin(angle * (3 + ring) + time * (0.55f + ring * 0.13f)) * (0.008f + strength * 0.085f)
                 val ripple = sin(angle * (7 + ring * 2) - time * 0.9f) * strength * 0.025f
-                val r = radius + unit * (drift + ripple)
+                // Use the player's actual PCM waveform, with a smooth seam at the top.
+                val sample = if (waveform.isNotEmpty()) waveform[(point * (waveform.size - 1) / 160).coerceIn(0, waveform.size - 1)] else 0f
+                val seam = sin(PI.toFloat() * point / 160f).coerceAtLeast(0f)
+                val soundWave = kotlin.math.tanh(sample * 3.5f) * seam * (if (ring == 1) 0.14f else 0.075f)
+                val r = radius + unit * (drift + ripple + soundWave)
                 val x = center.x + r * cos(angle)
                 val y = center.y + r * sin(angle)
                 if (point == 0) path.moveTo(x, y) else path.lineTo(x, y)

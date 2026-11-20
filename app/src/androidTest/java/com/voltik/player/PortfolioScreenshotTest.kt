@@ -51,6 +51,8 @@ class PortfolioScreenshotTest {
                 false, false, null, actions)
         }
         compose.waitForIdle()
+        device.waitForIdle()
+        SystemClock.sleep(1600)
         assertTrue(device.takeScreenshot(File(folder, "voltik-library.png")))
         compose.onNodeWithTag("album-portfolio").performClick()
         compose.onNodeWithTag("album-play").performClick()

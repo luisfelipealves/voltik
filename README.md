@@ -28,13 +28,13 @@ flowchart TD
 
 ## Build and try it
 
-Prerequisites: JDK 17 and Android SDK 35. The experimental build refers to `app/libs/projectM-TV-core-2.3.57.aar`; ensure that local dependency is available before building the projectM variant.
+Prerequisites: JDK 17, Android SDK 35 and Gradle installed locally. The experimental build refers to `app/libs/projectM-TV-core-2.3.57.aar`, which is not committed, and this branch has no Gradle wrapper. Obtain the AAR and place it at that path before building; a fresh clone is not yet reproducibly buildable.
 
 ```bash
 git clone https://github.com/luisfelipealves/voltik.git
 cd voltik
 git switch agent/projectm-experimental
-./gradlew testDebugUnitTest assembleDebug
+gradle testDebugUnitTest assembleDebug
 ```
 
 Install `app/build/outputs/apk/debug/app-debug.apk`, grant access to a folder containing MP3 files, and select a track. The SAF grant is user-controlled. The repository's versioned branch currently identifies itself as `0.1.5-experimental`; later APKs shared for testing are not assumed to be present in GitHub.

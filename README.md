@@ -8,7 +8,11 @@
 
 Choose music folders with Android's Storage Access Framework, browse albums and play through a persistent media session. The visualizer reads decoded PCM levels from the playback pipeline, with an experimental projectM/MilkDrop rendering path. The Android notification provides playback controls through Media3. The interface is built with Jetpack Compose.
 
-**Screenshot:** A verified capture of the current app is still needed; a concept image would not accurately document the implemented UI.
+| Library | Player |
+| --- | --- |
+| ![Voltik library on Android emulator](assets/emulator-library.png) | ![Voltik player on Android emulator](assets/emulator-player.png) |
+
+*Captured from the current production Compose UI in an API 34 emulator with explicitly supplied demonstration album and track metadata. The screenshots verify the screen layouts, not actual audio playback or projectM rendering. Physical-device playback remains a separate validation.*
 
 ## Architecture
 

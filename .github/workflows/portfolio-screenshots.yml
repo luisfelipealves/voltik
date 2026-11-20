@@ -1,0 +1,54 @@
+name: Portfolio screenshots (Android emulator)
+on:
+  push:
+    branches: [docs/emulator-screenshots-20261120]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  capture:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.11.1'
+      - uses: android-actions/setup-android@v4
+        with:
+          packages: platform-tools
+          log-accepted-android-sdk-licenses: false
+      - run: sdkmanager "platforms;android-35" "build-tools;35.0.0"
+      - name: Download and prepare projectM
+        run: |
+          mkdir -p app/libs
+          curl --fail --location --retry 3 -o app/libs/projectM-TV-core-2.3.57.aar https://github.com/johnneerdael/ProjectM-Android/releases/download/v2.3.57/projectM-TV-core-2.3.57.aar
+          echo "b18f9d0bc4b108d424d05cb8d7923c3ca4134faad86faf64da5d5ed95ed4c337  app/libs/projectM-TV-core-2.3.57.aar" | sha256sum -c -
+          python3 scripts/prepare_projectm.py app/libs/projectM-TV-core-2.3.57.aar
+      - name: Disposable emulator-only signing
+        run: |
+          mkdir -p .debug-signing
+          keytool -genkeypair -keystore .debug-signing/debug.keystore -storetype JKS -alias androiddebugkey -storepass android -keypass android -dname "CN=Emulator Screenshot,O=Testing,C=US" -keyalg RSA -keysize 2048 -validity 1 -noprompt
+      - name: Capture production Compose screens with fixture data
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 34
+          target: default
+          arch: x86_64
+          disable-animations: true
+          emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim
+          script: |
+            gradle --no-daemon -Pvoltik.ci.x86PlaybackOnly=true :app:connectedDebugAndroidTest -Pandroid.testInstrumentationRunnerArguments.class=com.voltik.player.PortfolioScreenshotTest
+            mkdir -p screenshots
+            adb pull /sdcard/Android/data/com.voltik.player/files/voltik-library.png screenshots/
+            adb pull /sdcard/Android/data/com.voltik.player/files/voltik-player.png screenshots/
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: voltik-emulator-screenshots
+          path: screenshots/*.png
+          if-no-files-found: error

@@ -7,7 +7,7 @@ permissions:
   contents: read
 jobs:
   capture:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 35
     steps:
       - uses: actions/checkout@v4
@@ -33,6 +33,7 @@ jobs:
         run: |
           mkdir -p .debug-signing
           keytool -genkeypair -keystore .debug-signing/debug.keystore -storetype JKS -alias androiddebugkey -storepass android -keypass android -dname "CN=Emulator Screenshot,O=Testing,C=US" -keyalg RSA -keysize 2048 -validity 1 -noprompt
+      - run: sudo chmod 666 /dev/kvm
       - name: Capture production Compose screens with fixture data
         uses: reactivecircus/android-emulator-runner@v2
         with:

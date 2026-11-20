@@ -43,10 +43,10 @@ jobs:
           disable-animations: true
           emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim
           script: |
-            gradle --no-daemon -Pvoltik.ci.x86PlaybackOnly=true :app:connectedDebugAndroidTest -Pandroid.testInstrumentationRunnerArguments.class=com.voltik.player.PortfolioScreenshotTest
+            gradle --no-daemon -Pvoltik.ci.x86PlaybackOnly=true :app:assembleDebug :app:assembleDebugAndroidTest
+            adb install -r app/build/outputs/apk/debug/app-debug.apk
+            adb install -r app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk
             mkdir -p screenshots
-            adb shell find /sdcard/Android/data -type f -name 'voltik-*.png' || true
-            adb shell pm list packages | grep voltik
             adb shell am instrument -w -e class com.voltik.player.PortfolioScreenshotTest com.voltik.player.test/androidx.test.runner.AndroidJUnitRunner
             adb shell find /sdcard/Android/data -type f -name 'voltik-*.png'
             adb pull /sdcard/Android/data/com.voltik.player/files/voltik-library.png screenshots/

@@ -1,0 +1,5 @@
+Voltik includes projectM Android core v2.3.57 by the projectM and ProjectM Android contributors, licensed under LGPL 2.1. The complete LGPL license accompanies this notice as projectm-lgpl-2.1.txt.
+Corresponding source, including Android modifications and build instructions: https://github.com/johnneerdael/ProjectM-Android/tree/v2.3.57
+Exact source commit: dd3564282f0c20b6d9fdba8e5fb1aac669d00909
+The app dynamically loads the projectM Android core shared library. Community preset and texture assets are removed from the upstream AAR when building Voltik; imported presets are supplied separately by their owners.
+The upstream core includes additional third-party components, including xCrash. Their notices are retained from the upstream distribution.

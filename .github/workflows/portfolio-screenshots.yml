@@ -45,6 +45,10 @@ jobs:
           script: |
             gradle --no-daemon -Pvoltik.ci.x86PlaybackOnly=true :app:connectedDebugAndroidTest -Pandroid.testInstrumentationRunnerArguments.class=com.voltik.player.PortfolioScreenshotTest
             mkdir -p screenshots
+            adb shell find /sdcard/Android/data -type f -name 'voltik-*.png' || true
+            adb shell pm list packages | grep voltik
+            adb shell am instrument -w -e class com.voltik.player.PortfolioScreenshotTest com.voltik.player.test/androidx.test.runner.AndroidJUnitRunner
+            adb shell find /sdcard/Android/data -type f -name 'voltik-*.png'
             adb pull /sdcard/Android/data/com.voltik.player/files/voltik-library.png screenshots/
             adb pull /sdcard/Android/data/com.voltik.player/files/voltik-player.png screenshots/
       - uses: actions/upload-artifact@v4
